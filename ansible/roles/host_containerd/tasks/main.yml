@@ -1,0 +1,221 @@
+---
+# Step 4 deliberately supports only isolated, operator-approved Ubuntu lab hosts.
+# Stage A: READ-ONLY validation before changes.
+- name: Require explicit lab-only acknowledgement
+  ansible.builtin.assert:
+    that:
+      - kauto_step4_ack | default('') == 'LAB_HOST_CHANGES_APPROVED'
+      - kauto_target_ip is defined
+      - kauto_target_ip | length > 6
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version in ['22.04', '24.04']
+      - ansible_architecture in ['x86_64', 'aarch64']
+    fail_msg: Step4 only operates on explicitly approved Ubuntu lab targets.
+
+- name: Read-only strict preflight on the target
+  ansible.builtin.script: step4_guard.py
+  register: kauto_guard_probe
+  changed_when: false
+  failed_when: kauto_guard_probe.rc != 0
+
+- name: Validate target binding to gathered IPv4 addresses
+  ansible.builtin.assert:
+    that:
+      - kauto_target_ip in (ansible_all_ipv4_addresses | default([]))
+      - kauto_guard_probe.stdout is search('KAUTO_STEP4_GUARD_OK')
+    fail_msg: Target identity mismatch or host guard failed; no changes allowed.
+
+- name: Locate any existing containerd executable (not only /usr/bin)
+  ansible.builtin.shell: command -v containerd
+  register: kauto_existing_containerd_probe
+  changed_when: false
+  failed_when: false
+
+- name: Set runtime presence flag
+  ansible.builtin.set_fact:
+    kauto_existing_containerd: "{{ kauto_existing_containerd_probe.rc == 0 }}"
+
+- name: Refuse to change an existing runtime lacking a validated reuse plan
+  ansible.builtin.assert:
+    that:
+      - not kauto_existing_containerd or kauto_runtime_existing_approved | default(false) | bool
+    fail_msg: Existing runtime cannot be altered or restarted implicitly.
+
+- name: Inspect existing runtime config (read-only)
+  ansible.builtin.command: containerd config dump
+  register: kauto_existing_dump
+  changed_when: false
+  when: kauto_existing_containerd
+
+- name: Require systemd cgroup and enabled CRI for existing containerd
+  ansible.builtin.assert:
+    that:
+      - kauto_existing_dump.stdout is search('SystemdCgroup\\s*=\\s*true')
+      - not (kauto_existing_dump.stdout is search('disabled_plugins\\s*=\\s*\\[[^]]*[\x22\x27]cri[\x22\x27]'))
+    fail_msg: Existing runtime is not proven suitable; refuse to modify it.
+  when: kauto_existing_containerd
+
+- name: Require explicit package pin for fresh installation
+  ansible.builtin.assert:
+    that:
+      - kauto_containerd_apt_version is defined
+      - kauto_containerd_apt_version is match('^[0-9][A-Za-z0-9.+:~_-]{0,119}$')
+    fail_msg: Exact, trusted Ubuntu containerd APT package version is required.
+  when: not kauto_existing_containerd
+
+- name: Check pinned Ubuntu archive package exists (no repository additions)
+  ansible.builtin.command:
+    argv: ['apt-cache', 'show', 'containerd={{ kauto_containerd_apt_version }}']
+  register: kauto_apt_candidate
+  changed_when: false
+  when: not kauto_existing_containerd
+
+- name: Simulate apt resolution, rejecting removals and unintended package changes
+  ansible.builtin.command:
+    argv: ['apt-get', '-s', 'install', 'containerd={{ kauto_containerd_apt_version }}']
+  register: kauto_apt_simulation
+  changed_when: false
+  when: not kauto_existing_containerd
+
+- name: Require simulated install to preserve existing packages
+  ansible.builtin.assert:
+    that:
+      - not (kauto_apt_simulation.stdout is search('(?m)^(Remv|Purg) '))
+    fail_msg: APT simulation proposes removal; existing packages must be preserved.
+  when: not kauto_existing_containerd
+
+# Stage B: controlled changes on a disposable VM only.
+- name: Declare persistent kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/90-kauto-kubernetes.conf
+    content: "overlay\nbr_netfilter\n"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  register: kauto_modules_file
+
+- name: Observe which modules are already loaded
+  ansible.builtin.stat:
+    path: "/sys/module/{{ item }}"
+  loop: [overlay, br_netfilter]
+  register: kauto_modules_before
+
+- name: Load missing modules now
+  ansible.builtin.command: modprobe {{ item.item }}
+  loop: "{{ kauto_modules_before.results }}"
+  when: not item.stat.exists
+  changed_when: true
+
+- name: Declare Kubernetes-specific networking sysctls
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-kauto-kubernetes.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  register: kauto_sysctl_file
+  notify: Apply kauto sysctl file
+
+- name: Flush sysctl handler before runtime tasks
+  ansible.builtin.meta: flush_handlers
+
+- name: Create protected change journal directory
+  ansible.builtin.file:
+    path: /var/lib/kauto/step4
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Backup fstab before editing
+  ansible.builtin.copy:
+    src: /etc/fstab
+    dest: /var/lib/kauto/step4/fstab.before
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  register: kauto_fstab_backup
+
+- name: Disable fstab swap entries persistently
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!\s*#)(\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# kauto-disabled-swap \1'
+    backup: true
+  register: kauto_fstab_changed
+
+- name: Disable active swap for this boot
+  ansible.builtin.command: swapoff -a
+  when: kauto_guard_probe.stdout is search('SWAP_ACTIVE')
+  changed_when: true
+
+- name: Install pinned containerd from already trusted Ubuntu APT repositories
+  ansible.builtin.apt:
+    name: 'containerd={{ kauto_containerd_apt_version }}'
+    state: present
+    update_cache: false
+    allow_downgrade: false
+  when: not kauto_existing_containerd
+
+- name: Read generated default runtime configuration after installation
+  ansible.builtin.command: containerd config default
+  register: kauto_containerd_defaults
+  changed_when: false
+  when: not kauto_existing_containerd
+
+- name: Verify default contains a single systemd runc switch
+  ansible.builtin.assert:
+    that:
+      - ((kauto_containerd_defaults.stdout | regex_findall('SystemdCgroup = false') | length) + (kauto_containerd_defaults.stdout | regex_findall('SystemdCgroup = true') | length)) == 1
+      - not (kauto_containerd_defaults.stdout is search('disabled_plugins\\s*=\\s*\\[[^]]*[\x22\x27]cri[\x22\x27]'))
+    fail_msg: Package config requires explicit review, refusing blind rewrite.
+  when: not kauto_existing_containerd
+
+- name: Create containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: not kauto_existing_containerd
+
+- name: Configure fresh containerd to use systemd cgroups only
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ kauto_containerd_defaults.stdout | replace('SystemdCgroup = false', 'SystemdCgroup = true') }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: not kauto_existing_containerd
+  notify: Restart newly installed containerd
+
+- name: Flush containerd restart handler
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure fresh containerd service is started and enabled
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: started
+    enabled: true
+  when: not kauto_existing_containerd
+
+- name: Check runtime Unix socket exists
+  ansible.builtin.stat:
+    path: /run/containerd/containerd.sock
+  register: kauto_cri_socket
+
+- name: Report runtime socket status (CRI v1 handshake is separate)
+  ansible.builtin.assert:
+    that:
+      - kauto_cri_socket.stat.exists
+      - kauto_cri_socket.stat.issock | default(false)
+    fail_msg: containerd CRI socket not found; do not proceed to kubeadm.

@@ -1,0 +1,10 @@
+---
+- name: Apply kauto sysctl file
+  ansible.builtin.command: sysctl --load=/etc/sysctl.d/90-kauto-kubernetes.conf
+  changed_when: true
+
+- name: Restart newly installed containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: restarted
+  when: not kauto_existing_containerd_ubuntu.stat.exists

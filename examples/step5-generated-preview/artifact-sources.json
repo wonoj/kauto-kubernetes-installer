@@ -1,0 +1,16 @@
+{
+  "applyAuthorized": false,
+  "schemaVersion": "kauto.artifacts/v1alpha1",
+  "sources": {
+    "calico-crds.yaml": {
+      "sha256": null,
+      "url": "https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/v3_projectcalico_org.yaml",
+      "verified": false
+    },
+    "calico-operator.yaml": {
+      "sha256": null,
+      "url": "https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/tigera-operator.yaml",
+      "verified": false
+    }
+  }
+}

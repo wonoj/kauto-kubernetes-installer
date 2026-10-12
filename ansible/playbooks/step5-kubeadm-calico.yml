@@ -1,0 +1,23 @@
+---
+# Dangerous, isolated LAB-ONLY, NOT invoked by kauto CLI.
+# Requires all file digests and configuration to be independently verified.
+- name: Step 5 kubeadm and Calico Operator (DISPOSABLE LAB ONLY)
+  hosts: kauto_lab_control_plane
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Require independently trusted SSH host keys
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+        fail_msg: Configure pre-verified SSH known_hosts and StrictHostKeyChecking.
+    - name: Never permit multiple control-plane targets for this experiment
+      ansible.builtin.assert:
+        that:
+          - groups['kauto_lab_control_plane'] | length == 1
+        fail_msg: Step5 lab role is single-control-plane only.
+  roles:
+    - kubeadm_calico

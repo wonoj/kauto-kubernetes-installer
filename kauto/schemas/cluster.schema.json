@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/kauto/schemas/cluster.v1alpha1.json",
+  "title": "Kauto cluster configuration, design v0.1",
+  "type": "object", "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "kauto.config/v1alpha1"},
+    "kind": {"const": "ClusterConfig"},
+    "metadata": {
+      "type": "object", "additionalProperties": false, "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,61}[a-z0-9]$"}}
+    },
+    "spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["topology", "kubernetes", "runtime", "networking", "execution", "security", "backup", "addons"],
+      "properties": {
+        "topology": {"enum": ["single-node", "multi-node"]},
+        "kubernetes": {
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "allowEOL", "apiServer", "kubeProxy"],
+          "properties": {
+            "version": {"anyOf": [{"const": "auto"}, {"type": "string", "pattern": "^v?1\\.[0-9]+\\.[0-9]+$"}]},
+            "allowEOL": {"type": "boolean"},
+            "apiServer": {"type": "object", "additionalProperties": false, "required": ["endpoint", "certSANs"],
+              "properties": {
+                "endpoint": {"type": "string", "minLength": 1},
+                "certSANs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+              }
+            },
+            "kubeProxy": {"enum": ["iptables", "nftables"]},
+            "upstreamDNS": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+          }
+        },
+        "runtime": {"type": "object", "additionalProperties": false,
+          "required": ["type", "reuseExisting", "criSocket", "cgroupDriver"],
+          "properties": {
+            "type": {"const": "containerd"},
+            "reuseExisting": {"type": "boolean"},
+            "criSocket": {"anyOf": [{"const": "auto"}, {"type": "string", "pattern": "^/[^\\n]+$"}]},
+            "cgroupDriver": {"const": "systemd"}
+          }
+        },
+        "networking": {"type": "object", "additionalProperties": false,
+          "required": ["ipFamily", "podCIDR", "serviceCIDR", "nodeIPSelection", "calico", "firewall"],
+          "properties": {
+            "ipFamily": {"const": "IPv4"},
+            "podCIDR": {"type": "string", "minLength": 1},
+            "serviceCIDR": {"type": "string", "minLength": 1},
+            "nodeIPSelection": {"const": "connectivity"},
+            "calico": {"type": "object", "additionalProperties": false,
+              "required": ["installMethod", "version", "encapsulation", "dataplane", "ipamBlockSize", "mtu"],
+              "properties": {
+                "installMethod": {"enum": ["operator", "manifest"]},
+                "version": {"anyOf": [{"const": "auto"}, {"type": "string", "pattern": "^v?3\\.[0-9]+\\.[0-9]+$"}]},
+                "encapsulation": {"enum": ["VXLANAlways", "VXLANCrossSubnet", "IPIPCrossSubnet", "NoneBGP"]},
+                "dataplane": {"const": "iptables"},
+                "ipamBlockSize": {"type": "integer", "minimum": 20, "maximum": 30},
+                "mtu": {"anyOf": [{"const": "auto"}, {"type": "integer", "minimum": 576, "maximum": 9000}]}
+              }
+            },
+            "firewall": {"type": "object", "additionalProperties": false,
+              "required": ["policy", "approvedRules"],
+              "properties": {
+                "policy": {"const": "approved-only"},
+                "approvedRules": {"type": "array", "uniqueItems": true,
+                  "items": {"type": "object", "additionalProperties": false,
+                    "required": ["protocol", "port", "sourceCIDR"],
+                    "properties": {
+                      "protocol": {"enum": ["tcp", "udp"]},
+                      "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                      "sourceCIDR": {"type": "string", "minLength": 1}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "execution": {"type": "object", "additionalProperties": false,
+          "required": ["unattended", "onConflict", "workerJoinConcurrency"],
+          "properties": {
+            "unattended": {"const": true}, "onConflict": {"const": "block"},
+            "workerJoinConcurrency": {"type": "integer", "minimum": 1, "maximum": 20}
+          }
+        },
+        "security": {"type": "object", "additionalProperties": false,
+          "required": ["sshAuth", "hostKeyChecking", "sudo"],
+          "properties": {"sshAuth": {"const": "agent-or-key"}, "hostKeyChecking": {"const": "strict"}, "sudo": {"const": "non-interactive"}}
+        },
+        "backup": {"type": "object", "additionalProperties": false, "required": ["etcd"],
+          "properties": {"etcd": {
+            "type": "object", "additionalProperties": false, "required": ["enabled"],
+            "properties": {
+              "enabled": {"type": "boolean"},
+              "destination": {"type": "string", "pattern": "^/[^\\n]+$"},
+              "encryptionKeyRef": {"type": "string", "pattern": "^(vault|secret-manager)://[^ ]+$"}
+            },
+            "allOf": [{"if": {"properties": {"enabled": {"const": true}}},
+                       "then": {"required": ["destination", "encryptionKeyRef"]}}]
+          }}
+        },
+        "addons": {
+          "type": "object", "additionalProperties": false,
+          "required": ["metricsServer", "storage", "metalLB", "gateway", "certManager", "monitoring"],
+          "properties": {
+            "metricsServer": {"$ref": "#/$defs/addonToggle"},
+            "storage": {"$ref": "#/$defs/addonToggle"},
+            "metalLB": {"$ref": "#/$defs/addonToggle"},
+            "gateway": {"$ref": "#/$defs/addonToggle"},
+            "certManager": {"$ref": "#/$defs/addonToggle"},
+            "monitoring": {"$ref": "#/$defs/addonToggle"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {"addonToggle": {"type": "object", "additionalProperties": false,
+    "required": ["enabled"], "properties": {"enabled": {"type": "boolean"}}}}
+}

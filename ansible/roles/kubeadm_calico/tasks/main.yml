@@ -1,0 +1,245 @@
+---
+# This role modifies the machine and MUST NEVER be invoked by the read-only CLI.
+# It is unverified until Ansible syntax and disposable VM integration tests are run.
+# No reset, force, overwrite of existing kubeadm cluster, or Docker removal.
+- name: Require explicit double lab approval, target IP and exact versions
+  ansible.builtin.assert:
+    that:
+      - kauto_step5_ack | default('') == 'LAB_KUBEADM_CALICO_CHANGES_APPROVED'
+      - kauto_step5_disposable_ack | default('') == 'TARGET_IS_DISPOSABLE_VM'
+      - kauto_step5_target_ip is defined
+      - kauto_step5_target_ip in (ansible_all_ipv4_addresses | default([]))
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version in ['22.04', '24.04']
+      - ansible_architecture in ['x86_64', 'aarch64']
+      - kauto_step5_kube_version is defined
+      - kauto_step5_kube_version is match('^1\\.37\\.1$')
+      - kauto_step5_kube_apt_version is defined
+      - kauto_step5_kube_apt_version is match('^1\\.37\\.1-[A-Za-z0-9.+:~_-]+$')
+      - kauto_step5_calico_version | default('') == '3.33.0'
+      - kauto_step5_artifact_dir is defined
+      - kauto_step5_artifact_dir is match('^/[A-Za-z0-9/_.-]+$')
+    fail_msg: Refusing Step5 outside a pinned, explicitly approved disposable Ubuntu VM.
+
+- name: Check exact SHA-256 pins have been independently supplied for EVERY artifact
+  ansible.builtin.assert:
+    that:
+      - kauto_step5_expected_sha is defined
+      - kauto_step5_expected_sha[item] is defined
+      - kauto_step5_expected_sha[item] is match('^[0-9a-f]{64}$')
+    fail_msg: All generated files and upstream Calico manifests need independently verified SHA-256 values.
+  loop:
+    - kubeadm-init.yaml
+    - calico-installation.yaml
+    - calico-crds.yaml
+    - calico-operator.yaml
+
+- name: Verify controller-local artifact content against independent pinned digests
+  ansible.builtin.assert:
+    that:
+      - (lookup('ansible.builtin.file', kauto_step5_artifact_dir ~ '/' ~ item, rstrip=False) | hash('sha256')) == kauto_step5_expected_sha[item]
+    fail_msg: Local artifact changed or its pinned digest is wrong; no host changes.
+  loop:
+    - kubeadm-init.yaml
+    - calico-installation.yaml
+    - calico-crds.yaml
+    - calico-operator.yaml
+
+- name: Reject existing Kubernetes installation markers before installing packages
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - /etc/kubernetes/admin.conf
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+    - /etc/kubernetes/kubelet.conf
+    - /var/lib/kubelet/config.yaml
+    - /var/lib/etcd/member
+    - /etc/cni/net.d/10-calico.conflist
+  register: kauto_existing_k8s
+
+- name: Require a clean disposable Kubernetes host
+  ansible.builtin.assert:
+    that:
+      - not (kauto_existing_k8s.results | selectattr('stat.exists') | list | length > 0)
+    fail_msg: Existing cluster data found; automatic reset or takeover forbidden.
+
+- name: Require existing runtime cgroup to be systemd (read-only)
+  ansible.builtin.command: containerd config dump
+  changed_when: false
+  register: kauto_runtime_dump
+
+- name: Prevent kubelet/runtime cgroup mismatch
+  ansible.builtin.assert:
+    that:
+      - kauto_runtime_dump.stdout is search('SystemdCgroup\\s*=\\s*true')
+      - not (kauto_runtime_dump.stdout is search('disabled_plugins\\s*=\\s*\\[[^]]*[\\x22\\x27]cri[\\x22\\x27]'))
+    fail_msg: Runtime must have active CRI and systemd cgroups before kubeadm setup.
+
+- name: Inspect firewalld and NetworkManager services (read-only)
+  ansible.builtin.command:
+    argv: [systemctl, is-active, '{{ item }}']
+  loop: [firewalld, NetworkManager]
+  register: kauto_network_daemons
+  changed_when: false
+  failed_when: false
+
+- name: Abort unsupported firewall/NetworkManager combinations without disabling them
+  ansible.builtin.assert:
+    that:
+      - (kauto_network_daemons.results | selectattr('stdout', 'equalto', 'active') | list | length) == 0
+    fail_msg: Active firewalld/NetworkManager requires a tested Calico-safe configuration; no automatic service changes.
+
+- name: Inspect UFW state if installed (read-only)
+  ansible.builtin.shell: command -v ufw >/dev/null 2>&1 && ufw status || true
+  changed_when: false
+  register: kauto_ufw_check
+
+- name: Require UFW disabled for unverified Step5 lab networking
+  ansible.builtin.assert:
+    that:
+      - not (kauto_ufw_check.stdout is search('(?m)^Status: active'))
+    fail_msg: Host firewall rules are not yet verified; this lab role will not open or disable UFW automatically.
+
+- name: Ensure swap is already off (Step4 is responsible for host prep)
+  ansible.builtin.command: swapon --noheadings --show
+  changed_when: false
+  register: kauto_swap_check
+
+- name: Abort if swap is active
+  ansible.builtin.assert:
+    that:
+      - kauto_swap_check.stdout | trim == ''
+    fail_msg: Disable swap with approved Step4 host setup first.
+
+- name: Simulate exact Kubernetes APT package installation
+  ansible.builtin.command:
+    argv:
+      - apt-get
+      - '-s'
+      - install
+      - 'kubelet={{ kauto_step5_kube_apt_version }}'
+      - 'kubeadm={{ kauto_step5_kube_apt_version }}'
+      - 'kubectl={{ kauto_step5_kube_apt_version }}'
+  changed_when: false
+  register: kauto_kube_apt_sim
+
+- name: Reject package removal and downgrades in simulation
+  ansible.builtin.assert:
+    that:
+      - not (kauto_kube_apt_sim.stdout is search('(?m)^(Remv|Purg) '))
+      - not (kauto_kube_apt_sim.stdout is search('(?m)^Inst (docker|containerd) '))
+    fail_msg: APT simulation changes an unrelated runtime or removes packages.
+
+# STAGE B: mutating operations BELOW THIS POINT, lab ONLY.
+- name: Install precisely pinned Kubernetes packages from pre-existing trusted APT sources
+  ansible.builtin.apt:
+    name:
+      - 'kubelet={{ kauto_step5_kube_apt_version }}'
+      - 'kubeadm={{ kauto_step5_kube_apt_version }}'
+      - 'kubectl={{ kauto_step5_kube_apt_version }}'
+    state: present
+    update_cache: false
+    allow_downgrade: false
+
+- name: Require a live, matching containerd CRI endpoint after installing kubeadm tooling
+  ansible.builtin.command:
+    argv: [crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, version, -o, json]
+  changed_when: false
+  register: kauto_cri_response
+
+- name: Require CRI API v1, not just an existing Unix socket
+  ansible.builtin.assert:
+    that:
+      - (kauto_cri_response.stdout | from_json).runtimeApiVersion == 'v1'
+    fail_msg: CRI v1 handshake failed; kubeadm must not run.
+
+- name: Create dedicated protected manifest directory
+  ansible.builtin.file:
+    path: /var/lib/kauto/step5
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Stage checksum-verified manifests on lab target
+  ansible.builtin.copy:
+    src: '{{ kauto_step5_artifact_dir }}/{{ item }}'
+    dest: '/var/lib/kauto/step5/{{ item }}'
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    - kubeadm-init.yaml
+    - calico-installation.yaml
+    - calico-crds.yaml
+    - calico-operator.yaml
+
+- name: Validate kubeadm YAML against the installed binary
+  ansible.builtin.command:
+    argv: [kubeadm, config, validate, --config, /var/lib/kauto/step5/kubeadm-init.yaml]
+  changed_when: false
+
+- name: Verify generated config requests the installed Kubernetes version
+  ansible.builtin.command: kubeadm version -o short
+  changed_when: false
+  register: kauto_kubeadm_ver
+
+- name: Require matching kubeadm version before irreversible init
+  ansible.builtin.assert:
+    that:
+      - kauto_kubeadm_ver.stdout | trim == 'v' ~ kauto_step5_kube_version
+
+- name: Run kubeadm initialization once only (never automatic reset)
+  ansible.builtin.command:
+    argv:
+      - kubeadm
+      - init
+      - --config
+      - /var/lib/kauto/step5/kubeadm-init.yaml
+      - --skip-token-print
+  args:
+    creates: /etc/kubernetes/admin.conf
+  no_log: true
+
+- name: Install pinned Calico CRDs from prevalidated local file
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, create, -f, /var/lib/kauto/step5/calico-crds.yaml]
+  register: kauto_crds_result
+  changed_when: "'created' in kauto_crds_result.stdout"
+
+- name: Install pinned Tigera Operator from prevalidated local file
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, create, -f, /var/lib/kauto/step5/calico-operator.yaml]
+  register: kauto_operator_result
+  changed_when: "'created' in kauto_operator_result.stdout"
+
+- name: Wait for operator deployment before installing Calico CR
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, tigera-operator, rollout, status, deployment/tigera-operator, --timeout=300s]
+  changed_when: false
+
+- name: Apply Kauto Calico Installation custom resource
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, -f, /var/lib/kauto/step5/calico-installation.yaml]
+  register: kauto_installation_result
+  changed_when: "'created' in kauto_installation_result.stdout or 'configured' in kauto_installation_result.stdout"
+
+- name: Wait for Calico daemonset health (not a substitute for network tests)
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system, rollout, status, daemonset/calico-node, --timeout=600s]
+  changed_when: false
+
+- name: Wait for CoreDNS deployment readiness
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, kube-system, rollout, status, deployment/coredns, --timeout=300s]
+  changed_when: false
+
+- name: Wait for the Kubernetes node to become Ready
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, wait, --for=condition=Ready, nodes, --all, --timeout=300s]
+  changed_when: false
+
+- name: Report cluster nodes (verification, no secret output)
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, nodes, -o, wide]
+  changed_when: false

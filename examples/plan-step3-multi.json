@@ -1,0 +1,378 @@
+{
+  "actions": [
+    {
+      "dependsOn": [],
+      "effect": "NONE",
+      "id": "discover",
+      "kind": "host.observe",
+      "phase": 0,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "SSH_HOST_KEY",
+        "NODE_IDENTITY",
+        "READ_ONLY_PRECHECK"
+      ],
+      "risk": "LOW",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01",
+        "worker-01",
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "discover"
+      ],
+      "effect": "NONE",
+      "id": "preflight",
+      "kind": "cluster.preflight",
+      "phase": 1,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "COMPATIBILITY",
+        "CIDR",
+        "MTU",
+        "PORTS",
+        "PRIVILEGES"
+      ],
+      "risk": "LOW",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01",
+        "worker-01",
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "preflight"
+      ],
+      "effect": "HOST_CONFIGURATION",
+      "id": "host:cp-01",
+      "kind": "host.prepare",
+      "phase": 2,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "SWAP",
+        "KERNEL",
+        "SYSCTL",
+        "FIREWALL"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "host:cp-01"
+      ],
+      "effect": "PACKAGE_AND_SERVICE",
+      "id": "cri:cp-01",
+      "kind": "runtime.ensure",
+      "phase": 3,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "CONTAINERD_VERSION",
+        "CRI_ENDPOINT",
+        "CGROUP_DRIVER"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "preflight"
+      ],
+      "effect": "HOST_CONFIGURATION",
+      "id": "host:worker-01",
+      "kind": "host.prepare",
+      "phase": 2,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "SWAP",
+        "KERNEL",
+        "SYSCTL",
+        "FIREWALL"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "host:worker-01"
+      ],
+      "effect": "PACKAGE_AND_SERVICE",
+      "id": "cri:worker-01",
+      "kind": "runtime.ensure",
+      "phase": 3,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "CONTAINERD_VERSION",
+        "CRI_ENDPOINT",
+        "CGROUP_DRIVER"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "preflight"
+      ],
+      "effect": "HOST_CONFIGURATION",
+      "id": "host:worker-02",
+      "kind": "host.prepare",
+      "phase": 2,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "SWAP",
+        "KERNEL",
+        "SYSCTL",
+        "FIREWALL"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "host:worker-02"
+      ],
+      "effect": "PACKAGE_AND_SERVICE",
+      "id": "cri:worker-02",
+      "kind": "runtime.ensure",
+      "phase": 3,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "CONTAINERD_VERSION",
+        "CRI_ENDPOINT",
+        "CGROUP_DRIVER"
+      ],
+      "risk": "MEDIUM",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "cri:cp-01"
+      ],
+      "effect": "K8S_CLUSTER_BOOTSTRAP",
+      "id": "control-plane",
+      "kind": "kubeadm.init",
+      "phase": 4,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "API_ENDPOINT",
+        "PKI",
+        "ETCD",
+        "EXISTING_CLUSTER"
+      ],
+      "risk": "HIGH",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "control-plane"
+      ],
+      "effect": "K8S_RESOURCES_AND_NETWORK",
+      "id": "cni",
+      "kind": "calico.install",
+      "phase": 5,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "CALICO_COMPAT",
+        "POD_CIDR",
+        "VXLAN_MTU"
+      ],
+      "risk": "HIGH",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "cni"
+      ],
+      "effect": "NONE",
+      "id": "cp-ready",
+      "kind": "control-plane.validate",
+      "phase": 6,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "APISERVER",
+        "CALICO",
+        "COREDNS"
+      ],
+      "risk": "LOW",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "cri:worker-01",
+        "cp-ready"
+      ],
+      "effect": "K8S_NODE_BOOTSTRAP",
+      "id": "join:worker-01",
+      "kind": "worker.join",
+      "phase": 7,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "TOKEN_TTL",
+        "CA_PIN",
+        "NODE_IP"
+      ],
+      "risk": "HIGH",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-01"
+      ]
+    },
+    {
+      "dependsOn": [
+        "cri:worker-02",
+        "cp-ready"
+      ],
+      "effect": "K8S_NODE_BOOTSTRAP",
+      "id": "join:worker-02",
+      "kind": "worker.join",
+      "phase": 7,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "TOKEN_TTL",
+        "CA_PIN",
+        "NODE_IP"
+      ],
+      "risk": "HIGH",
+      "status": "NOT_STARTED",
+      "targets": [
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "join:worker-01",
+        "join:worker-02"
+      ],
+      "effect": "NONE",
+      "id": "validate",
+      "kind": "cluster.validate",
+      "phase": 8,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "NODE_READY",
+        "SERVICE_DNS",
+        "POD_NETWORK",
+        "NETWORK_POLICY"
+      ],
+      "risk": "LOW",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01",
+        "worker-01",
+        "worker-02"
+      ]
+    },
+    {
+      "dependsOn": [
+        "validate"
+      ],
+      "effect": "ENCRYPTED_BACKUP",
+      "id": "etcd-snapshot",
+      "kind": "etcd.snapshot",
+      "phase": 100,
+      "reconciliation": "REQUIRE_LIVE_STATE_CHECK_BEFORE_CHANGES",
+      "requiredChecks": [
+        "BACKUP_KEY",
+        "SNAPSHOT_INTEGRITY"
+      ],
+      "risk": "LOW",
+      "status": "NOT_STARTED",
+      "targets": [
+        "cp-01"
+      ]
+    }
+  ],
+  "applyAuthorized": false,
+  "blockers": [
+    "Authenticated node OS, architecture and infrastructure facts are missing",
+    "No matching evidence-backed, fully pinned SUPPORTED stack",
+    "No authenticated environment discovery supplied",
+    "Discover Node IPs and test cross-node/control-plane connectivity",
+    "Measure/validate underlay MTU and VXLAN encapsulation overhead, including explicit MTU overrides",
+    "Verify SSH host key pins, agent authentication and non-interactive sudo on every inventory node",
+    "Verify OS/kernel/architecture, CRI, firewall, DNS/NTP, registry images and existing cluster state",
+    "Verify backup encryption key reference resolves before creating etcd snapshot",
+    "Step 3 has no apply executor, proven network reachability or verified deployable stack"
+  ],
+  "clusterName": "research-multi",
+  "compatibility": {
+    "candidates": [
+      {
+        "id": "ubuntu-2204-k137-calico333",
+        "status": "DOC_CANDIDATE"
+      },
+      {
+        "id": "ubuntu-2404-k137-calico333",
+        "status": "DOC_CANDIDATE"
+      }
+    ],
+    "selectedStack": null
+  },
+  "executable": false,
+  "inputHashes": {
+    "clusterSha256": "1081afb956c9d5d8e354bf02420547d8c575953407757eaa2bdbf05d2fd763c5",
+    "inventorySha256": "8f3a3abb41f3c5847a9a28b9ed655a5c900babea7307f04681a4a269d188c8b2",
+    "policySha256": "165b65f56064d437ddaba09658f65cc0b2c415faab753708f719976a483875f5"
+  },
+  "observation": {
+    "bindingIssues": [],
+    "nodes": null,
+    "observedAt": null,
+    "reportSha256": null,
+    "source": "NONE"
+  },
+  "planFingerprintSha256": "7eda4d7d1d01b1c178a9826e0dd8b245d428c4014f1af9b25fd0a47649ecbcf0",
+  "planKind": "DECLARATIVE_PREVIEW",
+  "safety": {
+    "approvalState": "NOT_AUTHORIZED",
+    "permittedOperations": [
+      "READ_ONLY_REVIEW"
+    ],
+    "prohibitedOperations": [
+      "APPLY",
+      "RESET",
+      "UPGRADE",
+      "DELETE"
+    ]
+  },
+  "schemaVersion": "kauto.plan/v1alpha1",
+  "status": "BLOCKED",
+  "warnings": [
+    "node cp-01 uses a documentation-only address; replace before deployment",
+    "node worker-01 uses a documentation-only address; replace before deployment",
+    "node worker-02 uses a documentation-only address; replace before deployment",
+    "No matching stack is VERIFIED/SUPPORTED by project integration tests; apply must block"
+  ]
+}

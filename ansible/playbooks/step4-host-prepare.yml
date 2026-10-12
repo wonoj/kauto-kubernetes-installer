@@ -1,0 +1,20 @@
+---
+# LAB-ONLY: independent Ansible playbook; not callable by kauto CLI.
+# Supply a strict host inventory and explicit risk acknowledgement.
+# No automatic Docker removal, no new third-party APT repos.
+- name: Step 4 Ubuntu host and containerd preparation (LAB ONLY)
+  hosts: kauto_lab_targets
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  serial: 1
+  any_errors_fatal: true
+  # SSH host-key trust must be configured by the caller BEFORE the first login.
+  pre_tasks:
+    - name: Require SSH strict host-key mode in invoking environment
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+        fail_msg: Set ANSIBLE_HOST_KEY_CHECKING=True and pre-seed verified known_hosts.
+  roles:
+    - host_containerd

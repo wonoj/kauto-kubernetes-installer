@@ -1,0 +1,19 @@
+# 192.0.2.0/24 is a documentation-only address block (RFC 5737).
+# Replace with a real inventory. Host keys must be trusted out of band.
+apiVersion: kauto.config/v1alpha1
+kind: Inventory
+metadata:
+  clusterName: research-k8s
+ssh:
+  user: ubuntu
+  port: 22
+  knownHostsFile: /etc/ssh/ssh_known_hosts
+  hostKeyChecking: strict
+  become: sudo
+nodes:
+  - id: cp-01
+    address: 192.0.2.10
+    role: control-plane
+    nodeIP: auto
+networks:
+  externalCIDRs: []

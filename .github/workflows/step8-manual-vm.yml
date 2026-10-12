@@ -1,0 +1,15 @@
+name: Step8 VM evidence (manual self-hosted lab)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disclaimer:
+    # Public workflow never accepts remote PR code on a credentialed lab runner.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain lab execution boundary
+        run: |
+          echo 'VM network/install tests must run manually on dedicated disposable hosts.'
+          echo 'See docs/step8/VM_ACCEPTANCE_RUNBOOK.md.'
+          echo 'This workflow does NOT claim that a VM test ran.'

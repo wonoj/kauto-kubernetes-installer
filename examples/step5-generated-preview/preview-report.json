@@ -1,0 +1,22 @@
+{
+  "applyAuthorized": false,
+  "calicoVersion": "3.33.0",
+  "candidateIds": [
+    "ubuntu-2204-k137-calico333",
+    "ubuntu-2404-k137-calico333"
+  ],
+  "factsAuthenticated": false,
+  "inputHashes": {
+    "clusterSha256": "d5de7494ac605cbd8dd2dec7f945f6a0d41bcf02659065ee5d914336da33c507",
+    "inventorySha256": "af876df733525b52bb3a6f813833acc5d136e670fc3d06fda3c8fef9bd84d85d",
+    "policySha256": "165b65f56064d437ddaba09658f65cc0b2c415faab753708f719976a483875f5"
+  },
+  "kubernetesVersion": "1.37.1",
+  "previewOnly": true,
+  "schemaVersion": "kauto.step5/v1alpha1",
+  "warnings": [
+    "Generated from user inputs, not authenticated server facts",
+    "Artifact SHA-256 digests and Ubuntu VM integration tests are not available",
+    "kubeadm config validate and CRI v1 handshake must pass on the target"
+  ]
+}

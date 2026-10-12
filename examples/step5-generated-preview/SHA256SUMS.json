@@ -1,0 +1,6 @@
+{
+  "artifact-sources.json": "8a2ef9e927a1f68c8ddb8cd1bad3a24709e87bf73902d05cb41a6861a5e5e6c3",
+  "calico-installation.yaml": "bcaf23bc03b93ef8c163f4097528cc33ff07002e7b6b6df5eb0accef52a0e830",
+  "kubeadm-init.yaml": "610b1613229b1f3a7fbce651aff006241736fd98884c1ab1805575372695fbac",
+  "preview-report.json": "d8d19ca742e977936e6fe4df82360715c7fa94ec417c04396da78375f88b2654"
+}

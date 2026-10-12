@@ -1,0 +1,15 @@
+---
+# Documentation addresses only. Replace with an isolated, disposable VM.
+all:
+  children:
+    kauto_lab_targets:
+      hosts:
+        lab-cp-01:
+          ansible_host: 192.0.2.10
+          ansible_user: ubuntu
+          ansible_port: 22
+          ansible_python_interpreter: /usr/bin/python3
+          kauto_target_ip: 192.0.2.10
+          # deliberately unset; must be supplied on deliberate lab test run:
+          # kauto_step4_ack: LAB_HOST_CHANGES_APPROVED
+          # kauto_containerd_apt_version: <APT exact package version>

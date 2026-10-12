@@ -1,0 +1,210 @@
+---
+# DELIBERATELY NOT CONNECTED TO KAUTO CLI. NOT PRODUCTION READY.
+# Only for individually approved, disposable, PRECONFIGURED Ubuntu lab VMs.
+# Never generate a token until every worker's non-mutating precheck has succeeded.
+- name: Step 7 - precheck one control-plane and all workers (READ ONLY)
+  hosts: kauto_lab_control_plane:kauto_lab_workers
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Require exact manual lab approvals and pinned host identities
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+          - kauto_step7_ack | default('') == 'LAB_WORKER_JOIN_APPROVED'
+          - kauto_step7_disposable_ack | default('') == 'TARGETS_ARE_DISPOSABLE_VMS'
+          - kauto_step7_allowed_targets is defined
+          - kauto_step7_allowed_targets is sequence
+          - inventory_hostname in kauto_step7_allowed_targets
+          - groups['kauto_lab_control_plane'] | length == 1
+          - groups['kauto_lab_workers'] | length >= 1
+          - ansible_connection == 'ssh'
+          - ansible_ssh_common_args is defined
+          - ansible_ssh_common_args is search('StrictHostKeyChecking=yes')
+          - ansible_ssh_common_args is search('UserKnownHostsFile=')
+          - ansible_ssh_common_args is search('BatchMode=yes')
+          - ansible_become_method == 'sudo'
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version in ['22.04', '24.04']
+          - ansible_virtualization_role == 'guest'
+          - ansible_hostname == inventory_hostname
+          - kauto_step7_kube_version is defined
+          - kauto_step7_kube_version is match('^1\\.[0-9]+\\.[0-9]+$')
+          - kauto_step7_expected_ca_hash is defined
+          - kauto_step7_expected_ca_hash is match('^sha256:[a-f0-9]{64}$')
+          - kauto_step7_api_endpoint is defined
+          - kauto_step7_api_endpoint is match('^[A-Za-z0-9.-]+:[0-9]{1,5}$')
+        fail_msg: 'Only independently approved disposable Ubuntu VM nodes are allowed.'
+
+    - name: Require the exact kubeadm patch on all nodes
+      ansible.builtin.command:
+        argv: [kubeadm, version, -o, short]
+      changed_when: false
+      register: kauto_step7_actual_version
+
+    - name: Reject kubeadm patch skew
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_actual_version.stdout | trim == 'v' ~ kauto_step7_kube_version
+
+    - name: Check kubelet patch is pinned on every target
+      ansible.builtin.command:
+        argv: [kubelet, --version]
+      changed_when: false
+      register: kauto_step7_kubelet_version
+
+    - name: Reject kubelet patch skew in this single-version lab
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_kubelet_version.stdout | trim == 'Kubernetes v' ~ kauto_step7_kube_version
+
+    - name: Require already prepared live CRI v1 on all nodes
+      ansible.builtin.command:
+        argv: [crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, version, -o, json]
+      changed_when: false
+      register: kauto_step7_cri
+
+    - name: Require CRI v1
+      ansible.builtin.assert:
+        that:
+          - (kauto_step7_cri.stdout | from_json).runtimeApiVersion == 'v1'
+
+    - name: Require Swap to be disabled
+      ansible.builtin.command:
+        argv: [swapon, --noheadings, --show]
+      changed_when: false
+      register: kauto_step7_swap
+
+    - name: Block active swap
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_swap.stdout | trim == ''
+
+    - name: Read existing node Kubernetes bootstrap markers
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop:
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/etcd/member
+      register: kauto_step7_markers
+
+    - name: Reject existing Kubernetes installation on worker
+      ansible.builtin.assert:
+        that:
+          - not (kauto_step7_markers.results | selectattr('stat.exists') | list | length > 0)
+      when: inventory_hostname in groups['kauto_lab_workers']
+
+    - name: Confirm control-plane kubeconfig exists on control-plane only
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: kauto_step7_admin
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+    - name: Require control-plane kubeconfig
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_admin.stat.exists
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+    - name: Ensure controller API is Ready before minting tokens
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, --raw=/readyz]
+      changed_when: false
+      register: kauto_step7_api_health
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+    - name: Fetch live API Server version (control-plane only)
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, version, -o, json]
+      changed_when: false
+      register: kauto_step7_server_version
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+    - name: Require pinned control-plane API Server version
+      ansible.builtin.assert:
+        that:
+          - (kauto_step7_server_version.stdout | from_json).serverVersion.gitVersion == 'v' ~ kauto_step7_kube_version
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+    - name: Require ready API Server
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_api_health.stdout | trim == 'ok'
+      when: inventory_hostname in groups['kauto_lab_control_plane']
+
+- name: Step 7 - Worker Join (MUTATING DISPOSABLE LAB ONLY)
+  hosts: kauto_lab_workers
+  gather_facts: false
+  become: true
+  become_flags: '-n'
+  serial: '{{ kauto_step7_worker_serial | default(1) | int }}'
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse out-of-range batch size
+      ansible.builtin.assert:
+        that:
+          - kauto_step7_worker_serial | default(1) | int >= 1
+          - kauto_step7_worker_serial | default(1) | int <= 4
+
+    - name: Mint single-use short-lived token, join, then revoke even on failure
+      block:
+        - name: Mint short-lived Worker bootstrap token (control-plane delegation)
+          ansible.builtin.command:
+            argv: [kubeadm, token, create, --ttl=10m, --print-join-command]
+          delegate_to: '{{ groups["kauto_lab_control_plane"][0] }}'
+          register: kauto_step7_join_secret
+          changed_when: true
+          no_log: true
+
+        - name: Validate the minted join token format, endpoint, and pinned CA hash
+          ansible.builtin.assert:
+            that:
+              - kauto_step7_join_secret.stdout is match('^kubeadm join [A-Za-z0-9.-]+:[0-9]{1,5} --token [a-z0-9]{6}\\.[a-z0-9]{16} --discovery-token-ca-cert-hash sha256:[a-f0-9]{64}$')
+              - kauto_step7_api_endpoint in kauto_step7_join_secret.stdout
+              - kauto_step7_expected_ca_hash in kauto_step7_join_secret.stdout
+          no_log: true
+
+        - name: Execute pinned Worker Join without shell or token logging
+          ansible.builtin.command:
+            argv:
+              - kubeadm
+              - join
+              - '{{ kauto_step7_api_endpoint }}'
+              - --token
+              - "{{ kauto_step7_join_secret.stdout.split('--token ')[1].split()[0] }}"
+              - --discovery-token-ca-cert-hash
+              - '{{ kauto_step7_expected_ca_hash }}'
+              - --cri-socket
+              - unix:///run/containerd/containerd.sock
+          no_log: true
+
+        - name: Confirm Kubernetes worker reports Ready
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig
+              - /etc/kubernetes/admin.conf
+              - wait
+              - --for=condition=Ready
+              - 'node/{{ inventory_hostname }}'
+              - --timeout=300s
+          delegate_to: '{{ groups["kauto_lab_control_plane"][0] }}'
+          changed_when: false
+          no_log: true
+      always:
+        - name: Revoke the minted token whether Join succeeded or failed
+          ansible.builtin.command:
+            argv:
+              - kubeadm
+              - token
+              - delete
+              - "{{ kauto_step7_join_secret.stdout.split('--token ')[1].split('.')[0] }}"
+          delegate_to: '{{ groups["kauto_lab_control_plane"][0] }}'
+          when:
+            - kauto_step7_join_secret is defined
+            - kauto_step7_join_secret.stdout is defined
+            - kauto_step7_join_secret.stdout is search('--token [a-z0-9]{6}\\.')
+          changed_when: true
+          no_log: true

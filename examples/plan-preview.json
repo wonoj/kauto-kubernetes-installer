@@ -1,0 +1,90 @@
+{
+  "actionPreview": [
+    {
+      "description": "Authenticated host and network inspection",
+      "id": "01-preflight",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "description": "Host setup and containerd CRI",
+      "id": "02-runtime",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "description": "kubeadm init (versioned YAML)",
+      "id": "03-control-plane",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "description": "Calico installation and node network validation",
+      "id": "04-calico",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "description": "CA-hash verified Worker join",
+      "id": "05-join",
+      "targets": []
+    },
+    {
+      "description": "Nodes, Pod/Service networking, DNS, policies",
+      "id": "06-validate",
+      "targets": [
+        "cp-01"
+      ]
+    },
+    {
+      "description": "Encrypted etcd snapshot",
+      "id": "07-snapshot",
+      "targets": [
+        "cp-01"
+      ]
+    }
+  ],
+  "apiVersion": "kauto.plan-preview/v1alpha1",
+  "applyAuthorized": false,
+  "blockers": [
+    "Authenticated node OS, architecture and infrastructure facts are missing",
+    "No matching evidence-backed, fully pinned SUPPORTED stack",
+    "Resolve and verify Pod/Service CIDRs against all node routes and declared external networks",
+    "Discover Node IPs and test cross-node/control-plane connectivity",
+    "Measure/validate underlay MTU and VXLAN encapsulation overhead, including explicit MTU overrides",
+    "Verify SSH host key pins, agent authentication and non-interactive sudo on every inventory node",
+    "Verify OS/kernel/architecture, CRI, firewall, DNS/NTP, registry images and existing cluster state",
+    "Verify backup encryption key reference resolves before creating etcd snapshot",
+    "Read-only Step 1: authenticated remote preflight and apply are not implemented"
+  ],
+  "candidates": [
+    {
+      "id": "ubuntu-2204-k137-calico333",
+      "status": "DOC_CANDIDATE"
+    },
+    {
+      "id": "ubuntu-2404-k137-calico333",
+      "status": "DOC_CANDIDATE"
+    }
+  ],
+  "clusterName": "research-k8s",
+  "executable": false,
+  "inputHashes": {
+    "clusterSha256": "d5de7494ac605cbd8dd2dec7f945f6a0d41bcf02659065ee5d914336da33c507",
+    "inventorySha256": "af876df733525b52bb3a6f813833acc5d136e670fc3d06fda3c8fef9bd84d85d",
+    "policySha256": "165b65f56064d437ddaba09658f65cc0b2c415faab753708f719976a483875f5"
+  },
+  "previewSha256": "d4de448566670aa77dc9feb430d702428118cc8ea60afd128b1be7c30c6ddd60",
+  "resolvedVersions": null,
+  "staticStatus": "PASS",
+  "status": "BLOCKED",
+  "warnings": [
+    "node cp-01 uses a documentation-only address; replace before deployment",
+    "No externalCIDRs declared; local static validation cannot prove absence of VPN/VPC/LAN route conflicts",
+    "No matching stack is VERIFIED/SUPPORTED by project integration tests; apply must block"
+  ]
+}

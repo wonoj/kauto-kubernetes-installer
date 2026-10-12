@@ -1,0 +1,27 @@
+# Addresses are documentation-only and must be replaced before deployment.
+apiVersion: kauto.config/v1alpha1
+kind: Inventory
+metadata:
+  clusterName: research-multi
+ssh:
+  user: ubuntu
+  port: 22
+  knownHostsFile: /etc/ssh/ssh_known_hosts
+  hostKeyChecking: strict
+  become: sudo
+nodes:
+  - id: cp-01
+    address: 192.0.2.10
+    role: control-plane
+    nodeIP: auto
+  - id: worker-01
+    address: 192.0.2.11
+    role: worker
+    nodeIP: auto
+  - id: worker-02
+    address: 192.0.2.12
+    role: worker
+    nodeIP: auto
+networks:
+  externalCIDRs:
+    - 172.31.0.0/16

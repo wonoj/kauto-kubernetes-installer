@@ -1,0 +1,10 @@
+# EXAMPLE ONLY. Do not run on real servers. No secrets belong in this file.
+# kauto_step7_allowed_targets MUST enumerate every lab node (control-plane and workers).
+kauto_step7_ack: LAB_WORKER_JOIN_APPROVED
+kauto_step7_disposable_ack: TARGETS_ARE_DISPOSABLE_VMS
+kauto_step7_allowed_targets: [cp-01, worker-01, worker-02]
+kauto_step7_kube_version: 1.37.1
+kauto_step7_worker_serial: 1
+# Independently verify CP identity/CA out-of-band prior to lab use:
+# kauto_step7_expected_ca_hash: 'sha256:<64 verified hex digits>'
+# kauto_step7_api_endpoint: '<verified control-plane>:6443'

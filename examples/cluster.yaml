@@ -1,0 +1,55 @@
+# Configuration example; not a Kubernetes kubeadm API document.
+apiVersion: kauto.config/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: research-k8s
+spec:
+  topology: single-node
+  kubernetes:
+    version: auto
+    allowEOL: false
+    apiServer:
+      endpoint: auto
+      certSANs: []
+    kubeProxy: iptables
+    upstreamDNS: []
+  runtime:
+    type: containerd
+    reuseExisting: true
+    criSocket: auto
+    cgroupDriver: systemd
+  networking:
+    ipFamily: IPv4
+    podCIDR: auto
+    serviceCIDR: auto
+    nodeIPSelection: connectivity
+    calico:
+      installMethod: operator
+      version: auto
+      encapsulation: VXLANAlways
+      dataplane: iptables
+      ipamBlockSize: 26
+      mtu: auto
+    firewall:
+      policy: approved-only
+      approvedRules: []
+  security:
+    sshAuth: agent-or-key
+    hostKeyChecking: strict
+    sudo: non-interactive
+  execution:
+    unattended: true
+    onConflict: block
+    workerJoinConcurrency: 2
+  backup:
+    etcd:
+      enabled: true
+      destination: /var/lib/kauto/backups
+      encryptionKeyRef: vault://etcd-snapshot-encryption
+  addons:
+    metricsServer: {enabled: false}
+    storage: {enabled: false}
+    metalLB: {enabled: false}
+    gateway: {enabled: false}
+    certManager: {enabled: false}
+    monitoring: {enabled: false}
