@@ -70,6 +70,15 @@ def parser():
     kp.add_argument('--output-dir', required=True, type=Path)
     kp.add_argument('--set', action='append', default=[])
     kp.add_argument('--allow-eol', action='store_true')
+    ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
+    ar.add_argument('--plan', required=True, type=Path)
+    ar.add_argument('--cluster', required=True, type=Path)
+    ar.add_argument('--inventory', required=True, type=Path)
+    ar.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    ar.add_argument('--preflight-report', type=Path)
+    ar.add_argument('--version-lock', type=Path)
+    ar.add_argument('--ack-plan-fingerprint')
+    ar.add_argument('--allow-eol', action='store_true')
     s = sub.add_parser('status', help='Inspect plan integrity and optionally input drift; no SSH')
     s.add_argument('--plan', required=True, type=Path)
     s.add_argument('--cluster', type=Path)
@@ -183,6 +192,14 @@ def main(argv=None):
             report = load_report(a.preflight_report)
             result = analyze_inventory(resolved, report, pinned_apt_version=a.containerd_apt_version)
             code = 3 if resolved.valid else 2
+        elif a.command == 'apply-review':
+            from .apply_review import review_apply
+            resolved = resolve(a.cluster, a.inventory, a.policy, allow_eol=a.allow_eol)
+            report = load_report(a.preflight_report) if a.preflight_report else None
+            lock = _load_plan(a.version_lock) if a.version_lock else None
+            result = review_apply(_load_plan(a.plan), resolved, report=report,
+                                  lock=lock, acknowledged_fingerprint=a.ack_plan_fingerprint)
+            code = 3 if result['status'] == 'BLOCKED' else 2
         elif a.command == 'status':
             if bool(a.cluster) != bool(a.inventory):
                 raise ConfigError('status --cluster and --inventory must be supplied together')

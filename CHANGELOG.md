@@ -8,3 +8,15 @@
 
 ## Subsequent release
 Only after independently documented Ubuntu lab results, closure of applicable P0 blockers, version-locked artifact checks and repeatable install/retry behavior. **Never retroactively edit a release tag.**
+
+## [0.9.0a1] - 2026-10-13 (P0 remediation patch candidate; NOT released)
+- New read-only `apply-review` confirms immutable plan fingerprints, local configuration/lock/report binding, and always refuses host mutation (SEC-801 remains OPEN).
+- Calico existing-resource/partial-install guard and isolated ownership review; switch guarded lab resource creation to conflict-safe server-side apply (SEC-802 remains OPEN pending VM and ownership validation).
+- CI workflow for Python regression and real `ansible-playbook --syntax-check`; initial tag syntax evidence verified from existing GitHub Actions, new patch CI not yet run.
+- Live Ubuntu/Kubernetes integration, authorized `apply` execution, and stable release remain BLOCKED.
+
+### Unpublished hardening within 0.9.0a1 candidate
+
+- Reject pre-existing CNI configuration entries before Kubernetes packages are modified.
+- Require an actual containerd CRI v1 response before Kubernetes package changes; do not auto-install `crictl`.
+- Align Step 8 gate `sourceVersion` metadata with the declared package version.

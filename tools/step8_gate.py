@@ -121,10 +121,19 @@ def run_gate():
               'rebootAndIdempotency':'NOT_RUN', 'supplyChainRelease':'NOT_RUN'}
     failures = [k for k,v in checks.items() if (v['status'] if isinstance(v,dict) else v) == 'FAIL']
     missing = [k for k,v in checks.items() if (v['status'] if isinstance(v,dict) else v) == 'NOT_RUN']
-    digest = hashlib.sha256((ROOT/'pyproject.toml').read_bytes()).hexdigest()
+    project_bytes = (ROOT/'pyproject.toml').read_bytes()
+    digest = hashlib.sha256(project_bytes).hexdigest()
+    # Python 3.10 support: avoid 3.11-only tomllib. The project metadata is
+    # pinned and source Version MUST agree with the published pyproject.
+    project_text = project_bytes.decode('utf-8')
+    project_block = project_text.split('[project]', 1)[1].split('\n[', 1)[0]
+    version_match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', project_block)
+    if not version_match:
+        raise ValueError('Missing [project] version in pyproject.toml')
+    source_version = version_match.group(1)
     return {'schemaVersion':'kauto.step8-gate/v1alpha1',
             'generatedAtUTC':dt.datetime.now(dt.timezone.utc).isoformat(),
-            'sourceVersion':'0.9.0a0','pyprojectSha256':digest,
+            'sourceVersion':source_version,'pyprojectSha256':digest,
             'result':'FAILED' if failures else 'BLOCKED' if missing else 'PASS',
             'releaseAuthorized':False, 'failures':failures,'notRun':missing,
             'checks':checks, 'note':'Static checks and mocked tests cannot prove VM installation or pod networking.'}

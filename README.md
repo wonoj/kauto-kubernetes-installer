@@ -1,3 +1,15 @@
+# Patch candidate 0.9.0a1 — NOT RELEASED, NOT INSTALL APPROVED
+
+> This unmerged P0 remediation patch adds `apply-review` (read-only) and safer Calico lab safeguards. **It does not install Kubernetes**, does not fix all P0 blockers, and has not been VM-tested. See [P0 remediation report](docs/step9/P0_REMEDIATION_REPORT_2026-10-13.md). The published v0.9.0-alpha.0 release remains unchanged.
+
+```bash
+python -m kauto apply-review --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml
+# returns BLOCKED (exit 3)
+```
+
+---
+
 # Kauto — Kubernetes installer research prototype (SOURCE PRE-RELEASE ONLY)
 
 > **WARNING:** Offline-only test evidence. **0 officially supported Kubernetes installation combinations**. Current CLI lacks a safe approved `apply` execution path; independent experimental Ansible playbooks are not approved for VM use until P0 safety fixes and syntax/identity checks. **Never run against production or existing clusters.**
