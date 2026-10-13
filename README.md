@@ -1,3 +1,27 @@
+# Unpublished 0.9.0a2 candidate — live safety review (NO APPLY)
+
+This patch extends P0 remediation with two **read-only** commands and does **not**
+authorize or implement a Kubernetes installer. No Ubuntu VM has been tested.
+
+```bash
+python -m kauto live-apply-review --ssh \
+  --plan /secure/plan.json --cluster /secure/cluster.yaml \
+  --inventory /secure/inventory.yaml
+python -m kauto calico-live-review \
+  --kubeconfig /secure/config --context exact-context
+```
+
+The SSH command only reaches explicitly declared hosts with strict preapproved
+`known_hosts` and reads fresh host facts. The kubectl command executes only
+`config current-context` and `get` (no `apply`/`exec`/`delete`). Neither command
+can prove comprehensive Calico/CNI absence; exit status `3` denotes **BLOCKED**.
+
+**SEC-801/802 remain P0 OPEN.** The earlier first GitHub source pre-release
+`v0.9.0-alpha.0` is immutable and unchanged. See
+[Live safety review report](docs/step9/LIVE_SAFETY_GATE_REPORT_2026-10-13.md).
+
+---
+
 # Patch candidate 0.9.0a1 — NOT RELEASED, NOT INSTALL APPROVED
 
 > This unmerged P0 remediation patch adds `apply-review` (read-only) and safer Calico lab safeguards. **It does not install Kubernetes**, does not fix all P0 blockers, and has not been VM-tested. See [P0 remediation report](docs/step9/P0_REMEDIATION_REPORT_2026-10-13.md). The published v0.9.0-alpha.0 release remains unchanged.

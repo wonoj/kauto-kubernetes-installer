@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kauto-config-core"
-version = "0.9.0a1"
+version = "0.9.0a2"
 description = "Step 9 P0 safety remediation candidate; source-only, no supported Kubernetes installer"
 requires-python = ">=3.10"
 dependencies = ["PyYAML==6.0.3", "jsonschema==4.26.0"]

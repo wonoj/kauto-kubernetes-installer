@@ -70,6 +70,17 @@ def parser():
     kp.add_argument('--output-dir', required=True, type=Path)
     kp.add_argument('--set', action='append', default=[])
     kp.add_argument('--allow-eol', action='store_true')
+    live = sub.add_parser('live-apply-review', help='Fresh SSH host drift check; ALWAYS BLOCKS installation')
+    live.add_argument('--plan', required=True, type=Path)
+    live.add_argument('--cluster', required=True, type=Path)
+    live.add_argument('--inventory', required=True, type=Path)
+    live.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    live.add_argument('--ssh', action='store_true', required=True)
+    live.add_argument('--timeout', type=int, default=35)
+    c = sub.add_parser('calico-live-review', help='Read-only kubectl GET inventory; no adoption or apply')
+    c.add_argument('--kubeconfig', required=True, type=Path)
+    c.add_argument('--context', required=True)
+    c.add_argument('--timeout', type=int, default=15)
     ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
     ar.add_argument('--plan', required=True, type=Path)
     ar.add_argument('--cluster', required=True, type=Path)
@@ -192,6 +203,15 @@ def main(argv=None):
             report = load_report(a.preflight_report)
             result = analyze_inventory(resolved, report, pinned_apt_version=a.containerd_apt_version)
             code = 3 if resolved.valid else 2
+        elif a.command == 'live-apply-review':
+            from .live_safety import live_plan_review
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = live_plan_review(_load_plan(a.plan), resolved, timeout=a.timeout)
+            code = 3 if result['status'] == 'BLOCKED' else 2
+        elif a.command == 'calico-live-review':
+            from .live_safety import read_calico_live
+            result = read_calico_live(kubeconfig=a.kubeconfig, context=a.context, timeout=a.timeout)
+            code = 3
         elif a.command == 'apply-review':
             from .apply_review import review_apply
             resolved = resolve(a.cluster, a.inventory, a.policy, allow_eol=a.allow_eol)

@@ -20,3 +20,9 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
 - Reject pre-existing CNI configuration entries before Kubernetes packages are modified.
 - Require an actual containerd CRI v1 response before Kubernetes package changes; do not auto-install `crictl`.
 - Align Step 8 gate `sourceVersion` metadata with the declared package version.
+
+## [0.9.0a2] - 2026-10-13 (local patch candidate; NOT RELEASED)
+- `live-apply-review`: collect fresh read-only strict-host-key SSH facts and compare node identity/facts to the original immutable Plan. Tampered plans are rejected before network access.
+- `calico-live-review`: inspect specified Kubernetes context and a conservative set of Calico namespace/CRD/deployment/daemonset markers with GET only. Existing objects block takeover, and absent known objects remain INCONCLUSIVE.
+- Add adversarial offline regression tests for drift, context mismatch, foreign/partial resources and read-only commands.
+- **NO** mutable executor, automatic recovery, integrated Ubuntu VM evidence, supported matrix or stable release. SEC-801/802 remain OPEN.
