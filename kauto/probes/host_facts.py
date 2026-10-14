@@ -168,7 +168,18 @@ def run():
     time_sync = command(['timedatectl', 'show', '-p', 'NTPSynchronized', '--value'])
     ntp = (time_sync.get('output', '').strip().lower() == 'yes') if time_sync['status'] == 'OK' else None
     selinux = command(['getenforce'])
-    exists = lambda p: Path(p).exists()
+    def exists(p):
+        # Return UNKNOWN for permission-denied or other unobservable paths.
+        # Use stat() instead of Path.exists(): Python versions differ on
+        # whether permission errors are suppressed by exists().
+        try:
+            Path(p).stat()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return None
+        return True
+    cgroup2 = exists('/sys/fs/cgroup/cgroup.controllers')
     return {
         'probeVersion': 'kauto.facts/v1alpha1',
         'os_id': release.get('ID', 'unknown').lower(),
@@ -183,7 +194,7 @@ def run():
         'memoryKiB': memory_kb(),
         'rootFreeGiB': free_gb,
         'swapDevices': active_swap(),
-        'cgroupVersion': 2 if exists('/sys/fs/cgroup/cgroup.controllers') else 1,
+        'cgroupVersion': 2 if cgroup2 is True else (1 if cgroup2 is False else None),
         'modulesLoaded': {'overlay': exists('/sys/module/overlay'), 'br_netfilter': exists('/sys/module/br_netfilter')},
         'sysctl': {'ipForward': sysctl('net/ipv4/ip_forward'),
                    'bridgeIptables': sysctl('net/bridge/bridge-nf-call-iptables')},
