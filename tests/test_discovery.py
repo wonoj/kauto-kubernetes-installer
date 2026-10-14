@@ -231,3 +231,28 @@ def test_preflight_requires_explicit_ssh_optin(capsys):
         main(args)
     assert ex.value.code==2
     capsys.readouterr()
+
+
+def test_local_probe_permission_denied_is_unknown(monkeypatch):
+    # Simulate kubeadm static pod path protected by restrictive permissions.
+    original_stat = Path.stat
+
+    def restricted_stat(self, *args, **kwargs):
+        if str(self) == '/etc/kubernetes/manifests/kube-apiserver.yaml':
+            raise PermissionError(13, 'Permission denied', str(self))
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'stat', restricted_stat)
+    observed = host_facts.run()
+    assert observed['kubernetes']['controlPlaneStaticPod'] is None
+    checks = node_checks({'role': 'control-plane'}, observed)
+    assert any(c['code'] == 'EXISTING_K8S' and c['result'] == 'BLOCK'
+               for c in checks)
+
+
+def test_unknown_kubernetes_markers_fail_closed():
+    f = facts()
+    f['kubernetes']['controlPlaneStaticPod'] = None
+    checks = node_checks({'role': 'control-plane'}, f)
+    assert any(c['code'] == 'EXISTING_K8S' and c['result'] == 'BLOCK'
+               for c in checks)

@@ -252,8 +252,11 @@ def node_checks(node, facts, cluster=None):
     else:
         checks.append(_check('DNS', 'PENDING', 'Nameservers configured; actual DNS resolution still untested'))
     kubernetes = facts.get('kubernetes', {})
-    if any(kubernetes.get(n) for n in ('adminConf', 'kubeletConf', 'controlPlaneStaticPod')):
+    markers = tuple(kubernetes.get(n) for n in ('adminConf', 'kubeletConf', 'controlPlaneStaticPod'))
+    if any(v is True for v in markers):
         checks.append(_check('EXISTING_K8S', 'BLOCK', 'Existing Kubernetes files detected; no overwrite or reset allowed'))
+    elif not all(v is False for v in markers):
+        checks.append(_check('EXISTING_K8S', 'BLOCK', 'Cannot verify Kubernetes marker files (permission denied or unavailable); installation prohibited'))
     else:
         checks.append(_check('EXISTING_K8S', 'PASS', 'No standard kubeadm markers found; this is not exhaustive'))
     runtime = facts.get('containerd', {})
