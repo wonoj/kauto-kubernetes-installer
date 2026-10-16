@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kauto-config-core"
-version = "0.9.0a5"
-description = "SEC-801 journaled read-only SSH execution boundary; host mutation blocked"
+version = "0.9.0a6"
+description = "SEC-801 guarded disposable-VM Step4 adapter candidate; production apply unavailable"
 requires-python = ">=3.10"
 dependencies = ["PyYAML==6.0.3", "jsonschema==4.26.0"]
 

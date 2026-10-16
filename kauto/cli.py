@@ -102,6 +102,14 @@ def parser():
     pr.add_argument('--snapshot', type=Path, required=True)
     pr.add_argument('--expected-install-id', help='Claimed ownership identifier; not authorization')
     pr.add_argument('--output', type=Path, help='New private report 0600; no overwrite')
+    s4 = sub.add_parser('step4-lab-review', help='SEC-801 Step4 candidate offline review; NO ANSIBLE execution')
+    s4.add_argument('--plan', required=True, type=Path)
+    s4.add_argument('--cluster', required=True, type=Path)
+    s4.add_argument('--inventory', required=True, type=Path)
+    s4.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    s4.add_argument('--ack-plan-fingerprint', required=True)
+    s4.add_argument('--node-id', required=True)
+    s4.add_argument('--containerd-apt-version', required=True)
     rb = sub.add_parser('readonly-execute', help='SEC-801 journaled real SSH observation; BLOCKS all host/cluster changes')
     rb.add_argument('--plan', required=True, type=Path)
     rb.add_argument('--cluster', required=True, type=Path)
@@ -254,6 +262,14 @@ def main(argv=None):
                                              expected_install_id=a.expected_install_id)
             if a.output:
                 _save_new(a.output, result)
+            code = 3
+        elif a.command == 'step4-lab-review':
+            from .lab_step4_executor import prepare_step4_contract
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = prepare_step4_contract(_load_plan(a.plan), resolved,
+                                            acknowledgement=a.ack_plan_fingerprint,
+                                            node_id=a.node_id,
+                                            exact_containerd_version=a.containerd_apt_version)
             code = 3
         elif a.command == 'readonly-execute':
             from .readonly_executor import run_readonly_boundary

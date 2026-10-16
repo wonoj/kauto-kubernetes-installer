@@ -40,3 +40,9 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
 - `0.9.0a5` SEC-801 candidate: real read-only SSH observation boundary, exclusive
   private journal, plan-bound SHA-256 chain, abrupt-interruption detection;
   **NO Kubernetes, Ansible or host mutation capability**. SEC-801 remains OPEN.
+
+- `0.9.0a6` SEC-801 unpublished lab candidate: introduce a **non-CLI** experimental
+  Step4-only Ansible mutation adapter (one disposable Ubuntu VM), with exact-plan
+  acknowledgement, new SSH observation, sticky once-per-node attempt fence,
+  fsynced SHA-linked local journal, and no automatic retry. CLI exposure is an
+  offline `step4-lab-review` only; full apply and release remain BLOCKED.
