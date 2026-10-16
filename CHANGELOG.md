@@ -1,3 +1,11 @@
+## 0.9.0a3 (unreleased, PR candidate) — SEC-801 partial
+
+- Add explicit plan-digest acknowledgement and deterministic catalog check before execution review.
+- Add `apply-gate` which can make fresh read-only SSH discovery but NEVER approves mutation.
+- Add `apply-rehearsal` offline scheduling/fault-stop simulation and SHA-chain receipts.
+- Add independent receipt integrity and dependency verification for simulation only.
+- All P0 safety findings remain open; no Kubernetes `apply` executor is exposed.
+
 # Changelog
 
 ## [0.9.0a0] - 2026-10-12 (first source pre-release candidate)
