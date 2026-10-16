@@ -216,3 +216,7 @@ Outputs (new private files, never overwritten):
 OS implementation states: Ubuntu 22.04/24.04 `LAB_PROTOTYPE` (not VM-tested); Debian/RHEL-family `PREVIEW_ONLY`, no mutating installer. A separate **lab-only** Worker Join playbook exists at `ansible/playbooks/step7-worker-join-lab.yml`. It is intentionally disconnected from `kauto`; running it can change disposable VMs and is not recommended before Step 8 VM testing.
 
 See [Step 7 design/test report](docs/STEP7_DESIGN_AND_TEST_REPORT.md) for limitations, safeguards and acceptance gates.
+
+### SEC-802 offline recovery review (not an installer)
+
+Run `python -m kauto partial-recovery-review --snapshot examples/partial-recovery-snapshot.example.json`; returns exit code 3 (blocked) and never alters a host. See `docs/step9/SEC802_PARTIAL_RECOVERY_REVIEW.md`.
