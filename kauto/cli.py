@@ -102,6 +102,19 @@ def parser():
     pr.add_argument('--snapshot', type=Path, required=True)
     pr.add_argument('--expected-install-id', help='Claimed ownership identifier; not authorization')
     pr.add_argument('--output', type=Path, help='New private report 0600; no overwrite')
+    rb = sub.add_parser('readonly-execute', help='SEC-801 journaled real SSH observation; BLOCKS all host/cluster changes')
+    rb.add_argument('--plan', required=True, type=Path)
+    rb.add_argument('--cluster', required=True, type=Path)
+    rb.add_argument('--inventory', required=True, type=Path)
+    rb.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    rb.add_argument('--ack-plan-fingerprint', required=True)
+    rb.add_argument('--state-dir', required=True, type=Path, help='Private 0700 directory (no symlinks)')
+    rb.add_argument('--run-id', required=True, help='Unique per-run identifier; never overwrite')
+    rb.add_argument('--ssh', action='store_true', required=True, help='Explicit read-only network permission')
+    rb.add_argument('--timeout', type=int, default=35)
+    log = sub.add_parser('readonly-log-check', help='Validate local read-only execution journal; never authorize installation')
+    log.add_argument('--journal', required=True, type=Path)
+    log.add_argument('--plan-fingerprint', required=True)
     ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
     ar.add_argument('--plan', required=True, type=Path)
     ar.add_argument('--cluster', required=True, type=Path)
@@ -241,6 +254,18 @@ def main(argv=None):
                                              expected_install_id=a.expected_install_id)
             if a.output:
                 _save_new(a.output, result)
+            code = 3
+        elif a.command == 'readonly-execute':
+            from .readonly_executor import run_readonly_boundary
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = run_readonly_boundary(_load_plan(a.plan), resolved,
+                                           acknowledgement=a.ack_plan_fingerprint,
+                                           state_dir=a.state_dir, run_id=a.run_id,
+                                           timeout=a.timeout)
+            code = 3
+        elif a.command == 'readonly-log-check':
+            from .readonly_executor import verify_readonly_log
+            result = verify_readonly_log(a.journal, plan_fingerprint=a.plan_fingerprint)
             code = 3
         elif a.command == 'apply-gate':
             from .approval_executor import approval_gate
