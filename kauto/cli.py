@@ -98,6 +98,10 @@ def parser():
     rehearsal.add_argument('--ack-plan-fingerprint', required=True)
     rehearsal.add_argument('--fail-at', help='Simulate failure at a declared action ID')
     rehearsal.add_argument('--output', type=Path, help='Save new 0600 receipt file; no overwrite')
+    pr = sub.add_parser('partial-recovery-review', help='SEC-802 untrusted snapshot diagnosis; NEVER RETRIES OR RESETS')
+    pr.add_argument('--snapshot', type=Path, required=True)
+    pr.add_argument('--expected-install-id', help='Claimed ownership identifier; not authorization')
+    pr.add_argument('--output', type=Path, help='New private report 0600; no overwrite')
     ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
     ar.add_argument('--plan', required=True, type=Path)
     ar.add_argument('--cluster', required=True, type=Path)
@@ -228,6 +232,15 @@ def main(argv=None):
         elif a.command == 'calico-live-review':
             from .live_safety import read_calico_live
             result = read_calico_live(kubeconfig=a.kubeconfig, context=a.context, timeout=a.timeout)
+            code = 3
+        elif a.command == 'partial-recovery-review':
+            from .partial_recovery import review_partial_recovery
+            if a.snapshot.is_symlink():
+                raise ValueError('Snapshot symlink rejected')
+            result = review_partial_recovery(_load_plan(a.snapshot),
+                                             expected_install_id=a.expected_install_id)
+            if a.output:
+                _save_new(a.output, result)
             code = 3
         elif a.command == 'apply-gate':
             from .approval_executor import approval_gate

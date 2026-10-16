@@ -34,3 +34,5 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
 - `calico-live-review`: inspect specified Kubernetes context and a conservative set of Calico namespace/CRD/deployment/daemonset markers with GET only. Existing objects block takeover, and absent known objects remain INCONCLUSIVE.
 - Add adversarial offline regression tests for drift, context mismatch, foreign/partial resources and read-only commands.
 - **NO** mutable executor, automatic recovery, integrated Ubuntu VM evidence, supported matrix or stable release. SEC-801/802 remain OPEN.
+
+- SEC-802 candidate: add offline partial kubeadm/Calico footprint classifier and CLI; no mutation/retry authority.
