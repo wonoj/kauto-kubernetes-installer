@@ -1,3 +1,32 @@
+# Unreleased 0.9.0a3 candidate — SEC-801 operator gate and OFFLINE DAG rehearsal
+
+The added `apply-gate` performs strict plan, acknowledgement and version-lock review;
+with `--ssh` it also makes a fresh **read-only** SSH host observation. It ALWAYS
+returns `BLOCKED` (exit code 3), regardless of positive review fields. No
+independently authenticated authorization issuer or mutation adapter exists.
+
+`apply-rehearsal` processes the deterministic action dependencies **in memory**,
+with optional fault injection, produces `SIMULATED` per-action receipts chained
+by SHA-256, and NEVER runs Kubernetes, SSH, Ansible, shell or host mutations.
+Its SHA chain is NOT a signature. `--output` creates a new private 0600 report.
+
+**SEC-801, SEC-802, SEC-803 remain OPEN.** No new installation combination is
+SUPPORTED, and no second GitHub release is authorized.
+
+```bash
+python -m kauto apply-gate --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml \
+  --ack-plan-fingerprint <64-lowercase-hex>
+python -m kauto apply-rehearsal --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml \
+  --ack-plan-fingerprint <64-lowercase-hex> --output ./rehearsal.json
+# Both commands return 3: BLOCKED; no installation occurs.
+```
+
+See [SEC-801 development report](docs/step9/SEC801_APPROVAL_ENGINE_2026-10-14.md).
+
+---
+
 # Unpublished 0.9.0a2 candidate — live safety review (NO APPLY)
 
 This patch extends P0 remediation with two **read-only** commands and does **not**
@@ -187,3 +216,7 @@ Outputs (new private files, never overwritten):
 OS implementation states: Ubuntu 22.04/24.04 `LAB_PROTOTYPE` (not VM-tested); Debian/RHEL-family `PREVIEW_ONLY`, no mutating installer. A separate **lab-only** Worker Join playbook exists at `ansible/playbooks/step7-worker-join-lab.yml`. It is intentionally disconnected from `kauto`; running it can change disposable VMs and is not recommended before Step 8 VM testing.
 
 See [Step 7 design/test report](docs/STEP7_DESIGN_AND_TEST_REPORT.md) for limitations, safeguards and acceptance gates.
+
+### SEC-802 offline recovery review (not an installer)
+
+Run `python -m kauto partial-recovery-review --snapshot examples/partial-recovery-snapshot.example.json`; returns exit code 3 (blocked) and never alters a host. See `docs/step9/SEC802_PARTIAL_RECOVERY_REVIEW.md`.

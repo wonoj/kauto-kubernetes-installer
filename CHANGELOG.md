@@ -1,3 +1,11 @@
+## 0.9.0a3 (unreleased, PR candidate) — SEC-801 partial
+
+- Add explicit plan-digest acknowledgement and deterministic catalog check before execution review.
+- Add `apply-gate` which can make fresh read-only SSH discovery but NEVER approves mutation.
+- Add `apply-rehearsal` offline scheduling/fault-stop simulation and SHA-chain receipts.
+- Add independent receipt integrity and dependency verification for simulation only.
+- All P0 safety findings remain open; no Kubernetes `apply` executor is exposed.
+
 # Changelog
 
 ## [0.9.0a0] - 2026-10-12 (first source pre-release candidate)
@@ -26,3 +34,5 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
 - `calico-live-review`: inspect specified Kubernetes context and a conservative set of Calico namespace/CRD/deployment/daemonset markers with GET only. Existing objects block takeover, and absent known objects remain INCONCLUSIVE.
 - Add adversarial offline regression tests for drift, context mismatch, foreign/partial resources and read-only commands.
 - **NO** mutable executor, automatic recovery, integrated Ubuntu VM evidence, supported matrix or stable release. SEC-801/802 remain OPEN.
+
+- SEC-802 candidate: add offline partial kubeadm/Calico footprint classifier and CLI; no mutation/retry authority.

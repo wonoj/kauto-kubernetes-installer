@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "kauto.partial-recovery-input/v1alpha1",
+  "kubeadm": {
+    "adminConf": false,
+    "kubeletConf": false,
+    "controlPlaneStaticPod": false,
+    "etcdMember": false,
+    "kubeletConfig": false
+  },
+  "calico": {
+    "namespace/tigera-operator": {
+      "exists": false
+    },
+    "namespace/calico-system": {
+      "exists": false
+    },
+    "crd/installations.operator.tigera.io": {
+      "exists": false
+    },
+    "otherForeignObjects": false
+  }
+}

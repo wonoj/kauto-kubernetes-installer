@@ -81,6 +81,27 @@ def parser():
     c.add_argument('--kubeconfig', required=True, type=Path)
     c.add_argument('--context', required=True)
     c.add_argument('--timeout', type=int, default=15)
+    gate = sub.add_parser('apply-gate', help='SEC-801 operator gate; ALWAYS BLOCKED, no mutation')
+    gate.add_argument('--plan', required=True, type=Path)
+    gate.add_argument('--cluster', required=True, type=Path)
+    gate.add_argument('--inventory', required=True, type=Path)
+    gate.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    gate.add_argument('--version-lock', type=Path)
+    gate.add_argument('--ack-plan-fingerprint', required=True)
+    gate.add_argument('--ssh', action='store_true', help='Explicit fresh read-only SSH check')
+    gate.add_argument('--timeout', type=int, default=35)
+    rehearsal = sub.add_parser('apply-rehearsal', help='Offline no-op DAG/failure rehearsal; NEVER INSTALLS')
+    rehearsal.add_argument('--plan', required=True, type=Path)
+    rehearsal.add_argument('--cluster', required=True, type=Path)
+    rehearsal.add_argument('--inventory', required=True, type=Path)
+    rehearsal.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    rehearsal.add_argument('--ack-plan-fingerprint', required=True)
+    rehearsal.add_argument('--fail-at', help='Simulate failure at a declared action ID')
+    rehearsal.add_argument('--output', type=Path, help='Save new 0600 receipt file; no overwrite')
+    pr = sub.add_parser('partial-recovery-review', help='SEC-802 untrusted snapshot diagnosis; NEVER RETRIES OR RESETS')
+    pr.add_argument('--snapshot', type=Path, required=True)
+    pr.add_argument('--expected-install-id', help='Claimed ownership identifier; not authorization')
+    pr.add_argument('--output', type=Path, help='New private report 0600; no overwrite')
     ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
     ar.add_argument('--plan', required=True, type=Path)
     ar.add_argument('--cluster', required=True, type=Path)
@@ -211,6 +232,32 @@ def main(argv=None):
         elif a.command == 'calico-live-review':
             from .live_safety import read_calico_live
             result = read_calico_live(kubeconfig=a.kubeconfig, context=a.context, timeout=a.timeout)
+            code = 3
+        elif a.command == 'partial-recovery-review':
+            from .partial_recovery import review_partial_recovery
+            if a.snapshot.is_symlink():
+                raise ValueError('Snapshot symlink rejected')
+            result = review_partial_recovery(_load_plan(a.snapshot),
+                                             expected_install_id=a.expected_install_id)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'apply-gate':
+            from .approval_executor import approval_gate
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            lock = _load_plan(a.version_lock) if a.version_lock else None
+            result = approval_gate(_load_plan(a.plan), resolved,
+                                   acknowledgement=a.ack_plan_fingerprint,
+                                   lock=lock, ssh=a.ssh, timeout=a.timeout)
+            code = 3
+        elif a.command == 'apply-rehearsal':
+            from .approval_executor import rehearse_actions
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = rehearse_actions(_load_plan(a.plan), resolved,
+                                      acknowledgement=a.ack_plan_fingerprint,
+                                      fail_at=a.fail_at)
+            if a.output:
+                _save_new(a.output, result)
             code = 3
         elif a.command == 'apply-review':
             from .apply_review import review_apply
