@@ -220,3 +220,13 @@ See [Step 7 design/test report](docs/STEP7_DESIGN_AND_TEST_REPORT.md) for limita
 ### SEC-802 offline recovery review (not an installer)
 
 Run `python -m kauto partial-recovery-review --snapshot examples/partial-recovery-snapshot.example.json`; returns exit code 3 (blocked) and never alters a host. See `docs/step9/SEC802_PARTIAL_RECOVERY_REVIEW.md`.
+
+### SEC-801 journaled read-only execution boundary (0.9.0a5 candidate)
+
+`readonly-execute` can issue fresh authenticated **read-only** SSH observation
+only when an existing plan was created from a live SSH discovery. It writes a
+private, write-ahead JSONL journal and always stops before *any* host/containerd/
+kubeadm/Calico mutation. A local plan hash acknowledgement is **not** an
+installation authorization or a signing key. Missing live baseline produces an
+explicit BLOCKED journal without even contacting a host. See
+[SEC-801 execution boundary](docs/step9/SEC801_READONLY_EXECUTION_BOUNDARY_2026-10-16.md).

@@ -36,3 +36,7 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
 - **NO** mutable executor, automatic recovery, integrated Ubuntu VM evidence, supported matrix or stable release. SEC-801/802 remain OPEN.
 
 - SEC-802 candidate: add offline partial kubeadm/Calico footprint classifier and CLI; no mutation/retry authority.
+
+- `0.9.0a5` SEC-801 candidate: real read-only SSH observation boundary, exclusive
+  private journal, plan-bound SHA-256 chain, abrupt-interruption detection;
+  **NO Kubernetes, Ansible or host mutation capability**. SEC-801 remains OPEN.
