@@ -46,3 +46,8 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
   acknowledgement, new SSH observation, sticky once-per-node attempt fence,
   fsynced SHA-linked local journal, and no automatic retry. CLI exposure is an
   offline `step4-lab-review` only; full apply and release remain BLOCKED.
+
+- `0.9.0a7` SEC-801 Step5 offline phase-safety review candidate: verifies
+  plan/node/phase bindings, exact local artifact SHA-256, basic kubeadm/Calico
+  semantics, untrusted partial-state classification and simulated fail-stop
+  kubeadm -> Calico -> validation ordering. **NO Step5 execution or approval**.
