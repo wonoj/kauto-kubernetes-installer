@@ -297,6 +297,36 @@
     argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system, rollout, status, daemonset/calico-node, --timeout=600s]
   changed_when: false
 
+# Single-node labs need the control-plane taint removed for ordinary workloads.
+# A separate explicit acknowledgement is required; never alter multi-node scheduling.
+- name: Require scoped single-node scheduling acknowledgement
+  ansible.builtin.assert:
+    that:
+      - kauto_step5_single_node_ack | default('') == 'SINGLE_NODE_CONTROL_PLANE_SCHEDULING_APPROVED'
+      - groups['kauto_lab_control_plane'] | length == 1
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Inspect nodes before removing the single-node scheduling taint
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, nodes, -o, json]
+  changed_when: false
+  register: kauto_single_node_check
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Require exactly the targeted control-plane and no other nodes
+  ansible.builtin.assert:
+    that:
+      - (kauto_single_node_check.stdout | from_json).items | length == 1
+      - (kauto_single_node_check.stdout | from_json).items[0].metadata.name == inventory_hostname
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Enable pod scheduling on the disposable single-node control-plane
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, taint, nodes,
+           '{{ inventory_hostname }}', 'node-role.kubernetes.io/control-plane:NoSchedule-']
+  changed_when: true
+  when: kauto_step5_single_node | default(false) | bool
+
 - name: Wait for CoreDNS deployment readiness
   ansible.builtin.command:
     argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, kube-system, rollout, status, deployment/coredns, --timeout=300s]

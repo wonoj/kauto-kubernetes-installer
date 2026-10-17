@@ -1,0 +1,54 @@
+---
+# READ-ONLY, disposable-VM single-node prerequisite test. No packages or files changed.
+- name: Verify prerequisites before Step5 mutation (LAB ONLY)
+  hosts: kauto_lab_control_plane
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse non-single-node, unexpected operating system or target
+      ansible.builtin.assert:
+        that:
+          - groups['kauto_lab_control_plane'] | length == 1
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version in ['22.04', '24.04']
+          - kauto_step5_disposable_ack == 'TARGET_IS_DISPOSABLE_VM'
+          - kauto_step5_target_ip in (ansible_all_ipv4_addresses | default([]))
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+    - name: Inspect kubeadm and CNI remnants
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /var/lib/etcd/member
+        - /var/lib/kubelet/config.yaml
+        - /etc/cni/net.d/10-calico.conflist
+      register: kauto_preexisting
+    - name: Reject any Kubernetes remnants
+      ansible.builtin.assert:
+        that:
+          - (kauto_preexisting.results | selectattr('stat.exists') | list | length) == 0
+    - name: Verify containerd CRI v1 is callable
+      ansible.builtin.command:
+        argv: [crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, version, -o, json]
+      register: kauto_cri_precheck
+      changed_when: false
+    - name: Require CRI API v1
+      ansible.builtin.assert:
+        that:
+          - (kauto_cri_precheck.stdout | from_json).runtimeApiVersion == 'v1'
+    - name: Confirm exact kubeadm package is available from preconfigured trusted repository
+      ansible.builtin.command:
+        argv: [apt-cache, show, 'kubeadm={{ kauto_step5_kube_apt_version }}']
+      changed_when: false
+    - name: Confirm exact kubelet package is available
+      ansible.builtin.command:
+        argv: [apt-cache, show, 'kubelet={{ kauto_step5_kube_apt_version }}']
+      changed_when: false
+    - name: Confirm exact kubectl package is available
+      ansible.builtin.command:
+        argv: [apt-cache, show, 'kubectl={{ kauto_step5_kube_apt_version }}']
+      changed_when: false

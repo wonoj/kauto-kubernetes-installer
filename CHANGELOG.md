@@ -51,3 +51,8 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
   plan/node/phase bindings, exact local artifact SHA-256, basic kubeadm/Calico
   semantics, untrusted partial-state classification and simulated fail-stop
   kubeadm -> Calico -> validation ordering. **NO Step5 execution or approval**.
+
+- `0.9.0a8` (source candidate): consolidate experimental **single-node** Step4 ->
+  pre/post host prerequisites -> Step5 into one fail-stop *internal* VM-lab
+  pipeline. Add pre-mutation APT/crictl checks and one-node scheduling guard.
+  No public mutating CLI, no multi-node join integration, no actual VM evidence.
