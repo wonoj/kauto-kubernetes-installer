@@ -56,3 +56,7 @@ Only after independently documented Ubuntu lab results, closure of applicable P0
   pre/post host prerequisites -> Step5 into one fail-stop *internal* VM-lab
   pipeline. Add pre-mutation APT/crictl checks and one-node scheduling guard.
   No public mutating CLI, no multi-node join integration, no actual VM evidence.
+
+- `0.9.0a9` experimental two-VM worker-join wrapper over the existing Step7
+  playbook, with bounded inventory, plan/CA/SSH preflight and one-shot journal.
+  **No public mutating CLI or real VM acceptance.** Source-only until tested.

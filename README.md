@@ -263,3 +263,14 @@ only after explicitly checking it is the **sole** node. This internal mutating
 Python API is NOT available through the public `kauto` CLI, and is not a
 supported installer. Re-use on existing Kubernetes VMs is prohibited.
 See `docs/step9/MINIMAL_SINGLE_NODE_INTEGRATION_2026-10-17.md`.
+
+### Kauto two-VM Worker Join integration (lab candidate only)
+
+The existing Step7 disposable-VM playbook is now connected to a restricted
+**internal** one-control-plane/one-worker orchestration boundary
+(`kauto.lab_worker_join_pipeline`). It verifies the plan, target identities,
+SSH state, CA pin, playbook digest and one-shot execution journal before invoking
+Ansible. Public installation mutation commands remain unavailable, and real
+Ubuntu installation has **not** been tested. It **does not install the worker's
+containerd or Kubernetes packages**. See
+[the two-node handoff and remaining acceptance](docs/step9/MINIMAL_TWO_NODE_WORKER_JOIN_2026-10-17.md).
