@@ -230,3 +230,12 @@ kubeadm/Calico mutation. A local plan hash acknowledgement is **not** an
 installation authorization or a signing key. Missing live baseline produces an
 explicit BLOCKED journal without even contacting a host. See
 [SEC-801 execution boundary](docs/step9/SEC801_READONLY_EXECUTION_BOUNDARY_2026-10-16.md).
+
+### SEC-801 experimental Step4 single-VM adapter (0.9.0a6 candidate)
+
+`python -m kauto step4-lab-review ...` is an **offline, always-BLOCKED** review
+of an individual Ubuntu VM Step4 candidate. `kauto.lab_step4_executor` contains
+an internal mutation-capable adapter used with **mocked Ansible only** in this
+version; **no user-facing mutating CLI exists**. It is untested on disposable
+Ubuntu VMs and unsafe to use on an existing Kubernetes control plane. See
+[Step4 prototype status and limitations](docs/step9/SEC801_STEP4_VM_MUTATION_ADAPTER_2026-10-16.md).
