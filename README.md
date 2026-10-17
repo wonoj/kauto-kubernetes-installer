@@ -250,3 +250,16 @@ matching digest and clean reported state produce `BLOCKED`, exit code 3.
 `step5-phase-rehearsal` simulates kubeadm -> Calico -> validation ordering and
 fault stops without performing any commands. See
 [Step5 phase gate report](docs/step9/SEC801_STEP5_PHASE_GATE_2026-10-17.md).
+
+### Experimental minimal single-node path (0.9.0a8 source candidate)
+
+`kauto.lab_single_node_pipeline` links the existing guarded Step4 and Step5
+playbooks **for mocked tests and future disposable-VM acceptance only**. It checks
+exact pinned local manifests, trusted SSH identity and package prerequisites
+before Step4, then re-observes the VM and validates CRI v1 before Step5.
+The one-shot local fence prevents automatic re-execution after interruption.
+The single-node-only Calico path removes the control-plane scheduling taint
+only after explicitly checking it is the **sole** node. This internal mutating
+Python API is NOT available through the public `kauto` CLI, and is not a
+supported installer. Re-use on existing Kubernetes VMs is prohibited.
+See `docs/step9/MINIMAL_SINGLE_NODE_INTEGRATION_2026-10-17.md`.
