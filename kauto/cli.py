@@ -70,6 +70,91 @@ def parser():
     kp.add_argument('--output-dir', required=True, type=Path)
     kp.add_argument('--set', action='append', default=[])
     kp.add_argument('--allow-eol', action='store_true')
+    live = sub.add_parser('live-apply-review', help='Fresh SSH host drift check; ALWAYS BLOCKS installation')
+    live.add_argument('--plan', required=True, type=Path)
+    live.add_argument('--cluster', required=True, type=Path)
+    live.add_argument('--inventory', required=True, type=Path)
+    live.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    live.add_argument('--ssh', action='store_true', required=True)
+    live.add_argument('--timeout', type=int, default=35)
+    c = sub.add_parser('calico-live-review', help='Read-only kubectl GET inventory; no adoption or apply')
+    c.add_argument('--kubeconfig', required=True, type=Path)
+    c.add_argument('--context', required=True)
+    c.add_argument('--timeout', type=int, default=15)
+    gate = sub.add_parser('apply-gate', help='SEC-801 operator gate; ALWAYS BLOCKED, no mutation')
+    gate.add_argument('--plan', required=True, type=Path)
+    gate.add_argument('--cluster', required=True, type=Path)
+    gate.add_argument('--inventory', required=True, type=Path)
+    gate.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    gate.add_argument('--version-lock', type=Path)
+    gate.add_argument('--ack-plan-fingerprint', required=True)
+    gate.add_argument('--ssh', action='store_true', help='Explicit fresh read-only SSH check')
+    gate.add_argument('--timeout', type=int, default=35)
+    rehearsal = sub.add_parser('apply-rehearsal', help='Offline no-op DAG/failure rehearsal; NEVER INSTALLS')
+    rehearsal.add_argument('--plan', required=True, type=Path)
+    rehearsal.add_argument('--cluster', required=True, type=Path)
+    rehearsal.add_argument('--inventory', required=True, type=Path)
+    rehearsal.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    rehearsal.add_argument('--ack-plan-fingerprint', required=True)
+    rehearsal.add_argument('--fail-at', help='Simulate failure at a declared action ID')
+    rehearsal.add_argument('--output', type=Path, help='Save new 0600 receipt file; no overwrite')
+    pr = sub.add_parser('partial-recovery-review', help='SEC-802 untrusted snapshot diagnosis; NEVER RETRIES OR RESETS')
+    pr.add_argument('--snapshot', type=Path, required=True)
+    pr.add_argument('--expected-install-id', help='Claimed ownership identifier; not authorization')
+    pr.add_argument('--output', type=Path, help='New private report 0600; no overwrite')
+    s4 = sub.add_parser('step4-lab-review', help='SEC-801 Step4 candidate offline review; NO ANSIBLE execution')
+    s4.add_argument('--plan', required=True, type=Path)
+    s4.add_argument('--cluster', required=True, type=Path)
+    s4.add_argument('--inventory', required=True, type=Path)
+    s4.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    s4.add_argument('--ack-plan-fingerprint', required=True)
+    s4.add_argument('--node-id', required=True)
+    s4.add_argument('--containerd-apt-version', required=True)
+    s5 = sub.add_parser('step5-phase-review', help='SEC-801 Step5 kubeadm/Calico offline gate; NEVER INSTALLS')
+    s5.add_argument('--plan', required=True, type=Path)
+    s5.add_argument('--cluster', required=True, type=Path)
+    s5.add_argument('--inventory', required=True, type=Path)
+    s5.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    s5.add_argument('--ack-plan-fingerprint', required=True)
+    s5.add_argument('--node-id', required=True)
+    s5.add_argument('--phase', choices=('kubeadm', 'calico'), required=True)
+    s5.add_argument('--snapshot', required=True, type=Path, help='Imported UNTRUSTED partial-recovery snapshot')
+    s5.add_argument('--artifact-dir', required=True, type=Path)
+    s5.add_argument('--sha256-manifest', required=True, type=Path, help='JSON file mapping four artifact names to expected SHA-256s')
+    s5.add_argument('--kubernetes-version', required=True)
+    s5.add_argument('--calico-version', required=True)
+    s5.add_argument('--kube-apt-version', required=True)
+    s5.add_argument('--output', type=Path, help='Create new protected review report')
+    sr = sub.add_parser('step5-phase-rehearsal', help='Simulate Step5 kubeadm/Calico phase dependency/fault stop')
+    sr.add_argument('--plan', required=True, type=Path)
+    sr.add_argument('--cluster', required=True, type=Path)
+    sr.add_argument('--inventory', required=True, type=Path)
+    sr.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    sr.add_argument('--ack-plan-fingerprint', required=True)
+    sr.add_argument('--fail-at', choices=('kubeadm', 'calico', 'validate'))
+    sr.add_argument('--output', type=Path)
+    rb = sub.add_parser('readonly-execute', help='SEC-801 journaled real SSH observation; BLOCKS all host/cluster changes')
+    rb.add_argument('--plan', required=True, type=Path)
+    rb.add_argument('--cluster', required=True, type=Path)
+    rb.add_argument('--inventory', required=True, type=Path)
+    rb.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    rb.add_argument('--ack-plan-fingerprint', required=True)
+    rb.add_argument('--state-dir', required=True, type=Path, help='Private 0700 directory (no symlinks)')
+    rb.add_argument('--run-id', required=True, help='Unique per-run identifier; never overwrite')
+    rb.add_argument('--ssh', action='store_true', required=True, help='Explicit read-only network permission')
+    rb.add_argument('--timeout', type=int, default=35)
+    log = sub.add_parser('readonly-log-check', help='Validate local read-only execution journal; never authorize installation')
+    log.add_argument('--journal', required=True, type=Path)
+    log.add_argument('--plan-fingerprint', required=True)
+    ar = sub.add_parser('apply-review', help='SEC-801 approval review ONLY; never runs Ansible')
+    ar.add_argument('--plan', required=True, type=Path)
+    ar.add_argument('--cluster', required=True, type=Path)
+    ar.add_argument('--inventory', required=True, type=Path)
+    ar.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    ar.add_argument('--preflight-report', type=Path)
+    ar.add_argument('--version-lock', type=Path)
+    ar.add_argument('--ack-plan-fingerprint')
+    ar.add_argument('--allow-eol', action='store_true')
     s = sub.add_parser('status', help='Inspect plan integrity and optionally input drift; no SSH')
     s.add_argument('--plan', required=True, type=Path)
     s.add_argument('--cluster', type=Path)
@@ -183,6 +268,95 @@ def main(argv=None):
             report = load_report(a.preflight_report)
             result = analyze_inventory(resolved, report, pinned_apt_version=a.containerd_apt_version)
             code = 3 if resolved.valid else 2
+        elif a.command == 'live-apply-review':
+            from .live_safety import live_plan_review
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = live_plan_review(_load_plan(a.plan), resolved, timeout=a.timeout)
+            code = 3 if result['status'] == 'BLOCKED' else 2
+        elif a.command == 'calico-live-review':
+            from .live_safety import read_calico_live
+            result = read_calico_live(kubeconfig=a.kubeconfig, context=a.context, timeout=a.timeout)
+            code = 3
+        elif a.command == 'partial-recovery-review':
+            from .partial_recovery import review_partial_recovery
+            if a.snapshot.is_symlink():
+                raise ValueError('Snapshot symlink rejected')
+            result = review_partial_recovery(_load_plan(a.snapshot),
+                                             expected_install_id=a.expected_install_id)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'step4-lab-review':
+            from .lab_step4_executor import prepare_step4_contract
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = prepare_step4_contract(_load_plan(a.plan), resolved,
+                                            acknowledgement=a.ack_plan_fingerprint,
+                                            node_id=a.node_id,
+                                            exact_containerd_version=a.containerd_apt_version)
+            code = 3
+        elif a.command == 'step5-phase-review':
+            from .step5_phase_gate import review_step5_phase
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            if a.snapshot.is_symlink() or a.sha256_manifest.is_symlink():
+                raise ValueError('Imported snapshot/manifest symlink rejected')
+            result = review_step5_phase(
+                _load_plan(a.plan), resolved,
+                acknowledgement=a.ack_plan_fingerprint, node_id=a.node_id,
+                phase=a.phase, snapshot=_load_plan(a.snapshot),
+                artifact_dir=a.artifact_dir,
+                expected_sha256=_load_plan(a.sha256_manifest),
+                kubernetes_version=a.kubernetes_version,
+                calico_version=a.calico_version,
+                kube_apt_version=a.kube_apt_version)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'step5-phase-rehearsal':
+            from .step5_phase_gate import rehearse_step5_phases
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = rehearse_step5_phases(_load_plan(a.plan), resolved,
+                                           acknowledgement=a.ack_plan_fingerprint,
+                                           fail_at=a.fail_at)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'readonly-execute':
+            from .readonly_executor import run_readonly_boundary
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = run_readonly_boundary(_load_plan(a.plan), resolved,
+                                           acknowledgement=a.ack_plan_fingerprint,
+                                           state_dir=a.state_dir, run_id=a.run_id,
+                                           timeout=a.timeout)
+            code = 3
+        elif a.command == 'readonly-log-check':
+            from .readonly_executor import verify_readonly_log
+            result = verify_readonly_log(a.journal, plan_fingerprint=a.plan_fingerprint)
+            code = 3
+        elif a.command == 'apply-gate':
+            from .approval_executor import approval_gate
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            lock = _load_plan(a.version_lock) if a.version_lock else None
+            result = approval_gate(_load_plan(a.plan), resolved,
+                                   acknowledgement=a.ack_plan_fingerprint,
+                                   lock=lock, ssh=a.ssh, timeout=a.timeout)
+            code = 3
+        elif a.command == 'apply-rehearsal':
+            from .approval_executor import rehearse_actions
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = rehearse_actions(_load_plan(a.plan), resolved,
+                                      acknowledgement=a.ack_plan_fingerprint,
+                                      fail_at=a.fail_at)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'apply-review':
+            from .apply_review import review_apply
+            resolved = resolve(a.cluster, a.inventory, a.policy, allow_eol=a.allow_eol)
+            report = load_report(a.preflight_report) if a.preflight_report else None
+            lock = _load_plan(a.version_lock) if a.version_lock else None
+            result = review_apply(_load_plan(a.plan), resolved, report=report,
+                                  lock=lock, acknowledged_fingerprint=a.ack_plan_fingerprint)
+            code = 3 if result['status'] == 'BLOCKED' else 2
         elif a.command == 'status':
             if bool(a.cluster) != bool(a.inventory):
                 raise ConfigError('status --cluster and --inventory must be supplied together')

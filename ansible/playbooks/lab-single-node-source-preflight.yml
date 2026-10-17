@@ -1,0 +1,46 @@
+---
+# Read-only prerequisite check BEFORE Step4 host mutation.
+# Requires a disposable VM preconfigured with trusted apt sources and crictl.
+- name: Validate all installation prerequisites before any Step4 changes
+  hosts: kauto_lab_control_plane
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Require a single approved Ubuntu VM and bound network address
+      ansible.builtin.assert:
+        that:
+          - groups['kauto_lab_control_plane'] | length == 1
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version in ['22.04', '24.04']
+          - kauto_step5_disposable_ack == 'TARGET_IS_DISPOSABLE_VM'
+          - kauto_step5_target_ip in (ansible_all_ipv4_addresses | default([]))
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+    - name: Confirm no Kubernetes bootstrap state exists
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/etcd/member
+      register: kauto_existing_nodes
+    - name: Reject any existing or partial Kubernetes installation
+      ansible.builtin.assert:
+        that:
+          - (kauto_existing_nodes.results | selectattr('stat.exists') | list | length) == 0
+    - name: Require preinstalled cri-tools client from trusted base image
+      ansible.builtin.command:
+        argv: [/usr/bin/which, crictl]
+      changed_when: false
+    - name: Require pinned containerd package in preconfigured Ubuntu APT sources
+      ansible.builtin.command:
+        argv: [apt-cache, show, 'containerd={{ kauto_containerd_apt_version }}']
+      changed_when: false
+    - name: Require pinned Kubernetes packages in preconfigured APT sources
+      ansible.builtin.command:
+        argv: [apt-cache, show, '{{ item }}={{ kauto_step5_kube_apt_version }}']
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false

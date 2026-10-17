@@ -1,3 +1,68 @@
+# Unreleased 0.9.0a3 candidate — SEC-801 operator gate and OFFLINE DAG rehearsal
+
+The added `apply-gate` performs strict plan, acknowledgement and version-lock review;
+with `--ssh` it also makes a fresh **read-only** SSH host observation. It ALWAYS
+returns `BLOCKED` (exit code 3), regardless of positive review fields. No
+independently authenticated authorization issuer or mutation adapter exists.
+
+`apply-rehearsal` processes the deterministic action dependencies **in memory**,
+with optional fault injection, produces `SIMULATED` per-action receipts chained
+by SHA-256, and NEVER runs Kubernetes, SSH, Ansible, shell or host mutations.
+Its SHA chain is NOT a signature. `--output` creates a new private 0600 report.
+
+**SEC-801, SEC-802, SEC-803 remain OPEN.** No new installation combination is
+SUPPORTED, and no second GitHub release is authorized.
+
+```bash
+python -m kauto apply-gate --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml \
+  --ack-plan-fingerprint <64-lowercase-hex>
+python -m kauto apply-rehearsal --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml \
+  --ack-plan-fingerprint <64-lowercase-hex> --output ./rehearsal.json
+# Both commands return 3: BLOCKED; no installation occurs.
+```
+
+See [SEC-801 development report](docs/step9/SEC801_APPROVAL_ENGINE_2026-10-14.md).
+
+---
+
+# Unpublished 0.9.0a2 candidate — live safety review (NO APPLY)
+
+This patch extends P0 remediation with two **read-only** commands and does **not**
+authorize or implement a Kubernetes installer. No Ubuntu VM has been tested.
+
+```bash
+python -m kauto live-apply-review --ssh \
+  --plan /secure/plan.json --cluster /secure/cluster.yaml \
+  --inventory /secure/inventory.yaml
+python -m kauto calico-live-review \
+  --kubeconfig /secure/config --context exact-context
+```
+
+The SSH command only reaches explicitly declared hosts with strict preapproved
+`known_hosts` and reads fresh host facts. The kubectl command executes only
+`config current-context` and `get` (no `apply`/`exec`/`delete`). Neither command
+can prove comprehensive Calico/CNI absence; exit status `3` denotes **BLOCKED**.
+
+**SEC-801/802 remain P0 OPEN.** The earlier first GitHub source pre-release
+`v0.9.0-alpha.0` is immutable and unchanged. See
+[Live safety review report](docs/step9/LIVE_SAFETY_GATE_REPORT_2026-10-13.md).
+
+---
+
+# Patch candidate 0.9.0a1 — NOT RELEASED, NOT INSTALL APPROVED
+
+> This unmerged P0 remediation patch adds `apply-review` (read-only) and safer Calico lab safeguards. **It does not install Kubernetes**, does not fix all P0 blockers, and has not been VM-tested. See [P0 remediation report](docs/step9/P0_REMEDIATION_REPORT_2026-10-13.md). The published v0.9.0-alpha.0 release remains unchanged.
+
+```bash
+python -m kauto apply-review --plan examples/plan-step3-single.json \
+  --cluster examples/cluster.yaml --inventory examples/inventory.yaml
+# returns BLOCKED (exit 3)
+```
+
+---
+
 # Kauto — Kubernetes installer research prototype (SOURCE PRE-RELEASE ONLY)
 
 > **WARNING:** Offline-only test evidence. **0 officially supported Kubernetes installation combinations**. Current CLI lacks a safe approved `apply` execution path; independent experimental Ansible playbooks are not approved for VM use until P0 safety fixes and syntax/identity checks. **Never run against production or existing clusters.**
@@ -151,3 +216,61 @@ Outputs (new private files, never overwritten):
 OS implementation states: Ubuntu 22.04/24.04 `LAB_PROTOTYPE` (not VM-tested); Debian/RHEL-family `PREVIEW_ONLY`, no mutating installer. A separate **lab-only** Worker Join playbook exists at `ansible/playbooks/step7-worker-join-lab.yml`. It is intentionally disconnected from `kauto`; running it can change disposable VMs and is not recommended before Step 8 VM testing.
 
 See [Step 7 design/test report](docs/STEP7_DESIGN_AND_TEST_REPORT.md) for limitations, safeguards and acceptance gates.
+
+### SEC-802 offline recovery review (not an installer)
+
+Run `python -m kauto partial-recovery-review --snapshot examples/partial-recovery-snapshot.example.json`; returns exit code 3 (blocked) and never alters a host. See `docs/step9/SEC802_PARTIAL_RECOVERY_REVIEW.md`.
+
+### SEC-801 journaled read-only execution boundary (0.9.0a5 candidate)
+
+`readonly-execute` can issue fresh authenticated **read-only** SSH observation
+only when an existing plan was created from a live SSH discovery. It writes a
+private, write-ahead JSONL journal and always stops before *any* host/containerd/
+kubeadm/Calico mutation. A local plan hash acknowledgement is **not** an
+installation authorization or a signing key. Missing live baseline produces an
+explicit BLOCKED journal without even contacting a host. See
+[SEC-801 execution boundary](docs/step9/SEC801_READONLY_EXECUTION_BOUNDARY_2026-10-16.md).
+
+### SEC-801 experimental Step4 single-VM adapter (0.9.0a6 candidate)
+
+`python -m kauto step4-lab-review ...` is an **offline, always-BLOCKED** review
+of an individual Ubuntu VM Step4 candidate. `kauto.lab_step4_executor` contains
+an internal mutation-capable adapter used with **mocked Ansible only** in this
+version; **no user-facing mutating CLI exists**. It is untested on disposable
+Ubuntu VMs and unsafe to use on an existing Kubernetes control plane. See
+[Step4 prototype status and limitations](docs/step9/SEC801_STEP4_VM_MUTATION_ADAPTER_2026-10-16.md).
+
+### Step5 kubeadm / Calico offline phase safety review (0.9.0a7 candidate)
+
+`python -m kauto step5-phase-review --help` reviews a single control-plane
+Step5-A (`kubeadm`) or Step5-B (`calico`) candidate using local, UNTRUSTED
+snapshot JSON, exact SHA-256 pins for four local artifacts and a matching plan.
+It never opens SSH, invokes kubeadm/kubectl/Ansible or changes the host. Even a
+matching digest and clean reported state produce `BLOCKED`, exit code 3.
+`step5-phase-rehearsal` simulates kubeadm -> Calico -> validation ordering and
+fault stops without performing any commands. See
+[Step5 phase gate report](docs/step9/SEC801_STEP5_PHASE_GATE_2026-10-17.md).
+
+### Experimental minimal single-node path (0.9.0a8 source candidate)
+
+`kauto.lab_single_node_pipeline` links the existing guarded Step4 and Step5
+playbooks **for mocked tests and future disposable-VM acceptance only**. It checks
+exact pinned local manifests, trusted SSH identity and package prerequisites
+before Step4, then re-observes the VM and validates CRI v1 before Step5.
+The one-shot local fence prevents automatic re-execution after interruption.
+The single-node-only Calico path removes the control-plane scheduling taint
+only after explicitly checking it is the **sole** node. This internal mutating
+Python API is NOT available through the public `kauto` CLI, and is not a
+supported installer. Re-use on existing Kubernetes VMs is prohibited.
+See `docs/step9/MINIMAL_SINGLE_NODE_INTEGRATION_2026-10-17.md`.
+
+### Kauto two-VM Worker Join integration (lab candidate only)
+
+The existing Step7 disposable-VM playbook is now connected to a restricted
+**internal** one-control-plane/one-worker orchestration boundary
+(`kauto.lab_worker_join_pipeline`). It verifies the plan, target identities,
+SSH state, CA pin, playbook digest and one-shot execution journal before invoking
+Ansible. Public installation mutation commands remain unavailable, and real
+Ubuntu installation has **not** been tested. It **does not install the worker's
+containerd or Kubernetes packages**. See
+[the two-node handoff and remaining acceptance](docs/step9/MINIMAL_TWO_NODE_WORKER_JOIN_2026-10-17.md).

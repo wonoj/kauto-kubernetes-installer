@@ -63,6 +63,26 @@
       - not (kauto_existing_k8s.results | selectattr('stat.exists') | list | length > 0)
     fail_msg: Existing cluster data found; automatic reset or takeover forbidden.
 
+- name: Check for existing CNI configuration directory before any package changes
+  ansible.builtin.stat:
+    path: /etc/cni/net.d
+  register: kauto_cni_dir
+
+- name: Enumerate existing CNI configuration entries including hidden files and symlinks
+  ansible.builtin.find:
+    paths: /etc/cni/net.d
+    file_type: any
+    hidden: true
+    recurse: false
+  when: kauto_cni_dir.stat.isdir | default(false)
+  register: kauto_existing_cni_entries
+
+- name: Refuse to change a host with pre-existing or foreign CNI configuration
+  ansible.builtin.assert:
+    that:
+      - (kauto_existing_cni_entries.matched | default(0) | int) == 0
+    fail_msg: Existing /etc/cni/net.d entries require provenance review; automatic CNI takeover forbidden.
+
 - name: Require existing runtime cgroup to be systemd (read-only)
   ansible.builtin.command: containerd config dump
   changed_when: false
@@ -110,6 +130,21 @@
     that:
       - kauto_swap_check.stdout | trim == ''
     fail_msg: Disable swap with approved Step4 host setup first.
+
+# The CRI handshake must succeed before package mutations. A clean VM without
+# crictl is NOT implicitly approved; the prerequisite must be provisioned via
+# a separately reviewed, pinned, non-destructive host setup operation.
+- name: Probe containerd CRI v1 before Kubernetes package mutation
+  ansible.builtin.command:
+    argv: [crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, version, -o, json]
+  changed_when: false
+  register: kauto_preinstall_cri_response
+
+- name: Reject a missing or incompatible runtime before Kubernetes package mutation
+  ansible.builtin.assert:
+    that:
+      - (kauto_preinstall_cri_response.stdout | from_json).runtimeApiVersion == 'v1'
+    fail_msg: CRI v1 handshake failed before any Kubernetes packages were changed.
 
 - name: Simulate exact Kubernetes APT package installation
   ansible.builtin.command:
@@ -201,17 +236,50 @@
     creates: /etc/kubernetes/admin.conf
   no_log: true
 
+# SEC-802: read-only takeover guard. Existing objects require human review.
+# This cannot recover partial kubeadm init; earlier clean-host guard intentionally
+# blocks re-entry into a partial installation. Do NOT remove markers automatically.
+- name: Inspect existing Tigera and Calico namespaces before any Calico mutation
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - get
+      - namespace
+      - '{{ item }}'
+      - --ignore-not-found
+      - -o
+      - name
+  loop: [tigera-operator, calico-system]
+  changed_when: false
+  register: kauto_step5_existing_calico_ns
+
+- name: Inspect existing Calico operator CRD before Calico mutation
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, crd,
+           installations.operator.tigera.io, --ignore-not-found, -o, name]
+  changed_when: false
+  register: kauto_step5_existing_calico_crd
+
+- name: Fail closed on foreign or partial Calico resources
+  ansible.builtin.assert:
+    that:
+      - (kauto_step5_existing_calico_ns.results | selectattr('stdout', 'ne', '') | list | length) == 0
+      - kauto_step5_existing_calico_crd.stdout | trim == ''
+    fail_msg: 'SEC-802: Existing or partially installed Calico/Operator objects need manual provenance/ownership review; no automatic adoption or reset.'
+
 - name: Install pinned Calico CRDs from prevalidated local file
   ansible.builtin.command:
-    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, create, -f, /var/lib/kauto/step5/calico-crds.yaml]
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, --server-side, --field-manager=kauto-lab, -f, /var/lib/kauto/step5/calico-crds.yaml]
   register: kauto_crds_result
-  changed_when: "'created' in kauto_crds_result.stdout"
+  changed_when: "'created' in kauto_crds_result.stdout or 'serverside-applied' in kauto_crds_result.stdout"
 
 - name: Install pinned Tigera Operator from prevalidated local file
   ansible.builtin.command:
-    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, create, -f, /var/lib/kauto/step5/calico-operator.yaml]
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, --server-side, --field-manager=kauto-lab, -f, /var/lib/kauto/step5/calico-operator.yaml]
   register: kauto_operator_result
-  changed_when: "'created' in kauto_operator_result.stdout"
+  changed_when: "'created' in kauto_operator_result.stdout or 'serverside-applied' in kauto_operator_result.stdout"
 
 - name: Wait for operator deployment before installing Calico CR
   ansible.builtin.command:
@@ -228,6 +296,36 @@
   ansible.builtin.command:
     argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system, rollout, status, daemonset/calico-node, --timeout=600s]
   changed_when: false
+
+# Single-node labs need the control-plane taint removed for ordinary workloads.
+# A separate explicit acknowledgement is required; never alter multi-node scheduling.
+- name: Require scoped single-node scheduling acknowledgement
+  ansible.builtin.assert:
+    that:
+      - kauto_step5_single_node_ack | default('') == 'SINGLE_NODE_CONTROL_PLANE_SCHEDULING_APPROVED'
+      - groups['kauto_lab_control_plane'] | length == 1
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Inspect nodes before removing the single-node scheduling taint
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, nodes, -o, json]
+  changed_when: false
+  register: kauto_single_node_check
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Require exactly the targeted control-plane and no other nodes
+  ansible.builtin.assert:
+    that:
+      - (kauto_single_node_check.stdout | from_json).items | length == 1
+      - (kauto_single_node_check.stdout | from_json).items[0].metadata.name == inventory_hostname
+  when: kauto_step5_single_node | default(false) | bool
+
+- name: Enable pod scheduling on the disposable single-node control-plane
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, taint, nodes,
+           '{{ inventory_hostname }}', 'node-role.kubernetes.io/control-plane:NoSchedule-']
+  changed_when: true
+  when: kauto_step5_single_node | default(false) | bool
 
 - name: Wait for CoreDNS deployment readiness
   ansible.builtin.command:

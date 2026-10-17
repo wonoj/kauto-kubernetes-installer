@@ -21,3 +21,12 @@ Relevant official guidance:
 - Kubernetes kubeadm reset is best-effort and does **not** clean CNI config or kube-proxy networking rules: https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-reset/
 - Ansible check mode is not a complete simulation of all tasks and can lack registered results: https://docs.ansible.com/projects/ansible/latest/user_guide/playbooks_checkmode.html
 - Linux worker joins require kubeadm/kubelet/container runtime and CA-pinned discovery: https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/adding-linux-nodes/
+
+## Addendum — 2026-10-13 (unpublished 0.9.0a2 candidate)
+
+- **SEC-801 remains OPEN:** the new `live-apply-review --ssh` opens fresh read-only SSH sessions using strict known_hosts and checks observed host facts against the fingerprinted plan. It does **not** bind an authorized execution transaction, authorize Ansible, or prove unattended network readiness.
+- **SEC-802 remains OPEN:** `calico-live-review` queries five well-known Kubernetes resources using explicit-context GETs and conservatively refuses foreign or partial installations. It cannot prove the absence of all Calico resources, host CNI files, or safely heal partial kubeadm/Operator runs. No cluster mutation was performed.
+- **SEC-803 remains OPEN:** no actual Ubuntu VM installation, network policy, idempotence, or fault-injection evidence.
+- **SEC-804:** original-tag Ansible syntax evidence from remote CI exists; new 0.9.0a2 patch needs its own CI rerun.
+
+The project's installer release gate remains **BLOCKED**.
