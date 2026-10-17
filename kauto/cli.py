@@ -110,6 +110,29 @@ def parser():
     s4.add_argument('--ack-plan-fingerprint', required=True)
     s4.add_argument('--node-id', required=True)
     s4.add_argument('--containerd-apt-version', required=True)
+    s5 = sub.add_parser('step5-phase-review', help='SEC-801 Step5 kubeadm/Calico offline gate; NEVER INSTALLS')
+    s5.add_argument('--plan', required=True, type=Path)
+    s5.add_argument('--cluster', required=True, type=Path)
+    s5.add_argument('--inventory', required=True, type=Path)
+    s5.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    s5.add_argument('--ack-plan-fingerprint', required=True)
+    s5.add_argument('--node-id', required=True)
+    s5.add_argument('--phase', choices=('kubeadm', 'calico'), required=True)
+    s5.add_argument('--snapshot', required=True, type=Path, help='Imported UNTRUSTED partial-recovery snapshot')
+    s5.add_argument('--artifact-dir', required=True, type=Path)
+    s5.add_argument('--sha256-manifest', required=True, type=Path, help='JSON file mapping four artifact names to expected SHA-256s')
+    s5.add_argument('--kubernetes-version', required=True)
+    s5.add_argument('--calico-version', required=True)
+    s5.add_argument('--kube-apt-version', required=True)
+    s5.add_argument('--output', type=Path, help='Create new protected review report')
+    sr = sub.add_parser('step5-phase-rehearsal', help='Simulate Step5 kubeadm/Calico phase dependency/fault stop')
+    sr.add_argument('--plan', required=True, type=Path)
+    sr.add_argument('--cluster', required=True, type=Path)
+    sr.add_argument('--inventory', required=True, type=Path)
+    sr.add_argument('--policy', type=Path, default=ROOT/'compatibility'/'compatibility-policy.yaml')
+    sr.add_argument('--ack-plan-fingerprint', required=True)
+    sr.add_argument('--fail-at', choices=('kubeadm', 'calico', 'validate'))
+    sr.add_argument('--output', type=Path)
     rb = sub.add_parser('readonly-execute', help='SEC-801 journaled real SSH observation; BLOCKS all host/cluster changes')
     rb.add_argument('--plan', required=True, type=Path)
     rb.add_argument('--cluster', required=True, type=Path)
@@ -270,6 +293,32 @@ def main(argv=None):
                                             acknowledgement=a.ack_plan_fingerprint,
                                             node_id=a.node_id,
                                             exact_containerd_version=a.containerd_apt_version)
+            code = 3
+        elif a.command == 'step5-phase-review':
+            from .step5_phase_gate import review_step5_phase
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            if a.snapshot.is_symlink() or a.sha256_manifest.is_symlink():
+                raise ValueError('Imported snapshot/manifest symlink rejected')
+            result = review_step5_phase(
+                _load_plan(a.plan), resolved,
+                acknowledgement=a.ack_plan_fingerprint, node_id=a.node_id,
+                phase=a.phase, snapshot=_load_plan(a.snapshot),
+                artifact_dir=a.artifact_dir,
+                expected_sha256=_load_plan(a.sha256_manifest),
+                kubernetes_version=a.kubernetes_version,
+                calico_version=a.calico_version,
+                kube_apt_version=a.kube_apt_version)
+            if a.output:
+                _save_new(a.output, result)
+            code = 3
+        elif a.command == 'step5-phase-rehearsal':
+            from .step5_phase_gate import rehearse_step5_phases
+            resolved = resolve(a.cluster, a.inventory, a.policy)
+            result = rehearse_step5_phases(_load_plan(a.plan), resolved,
+                                           acknowledgement=a.ack_plan_fingerprint,
+                                           fail_at=a.fail_at)
+            if a.output:
+                _save_new(a.output, result)
             code = 3
         elif a.command == 'readonly-execute':
             from .readonly_executor import run_readonly_boundary

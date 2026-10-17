@@ -239,3 +239,14 @@ an internal mutation-capable adapter used with **mocked Ansible only** in this
 version; **no user-facing mutating CLI exists**. It is untested on disposable
 Ubuntu VMs and unsafe to use on an existing Kubernetes control plane. See
 [Step4 prototype status and limitations](docs/step9/SEC801_STEP4_VM_MUTATION_ADAPTER_2026-10-16.md).
+
+### Step5 kubeadm / Calico offline phase safety review (0.9.0a7 candidate)
+
+`python -m kauto step5-phase-review --help` reviews a single control-plane
+Step5-A (`kubeadm`) or Step5-B (`calico`) candidate using local, UNTRUSTED
+snapshot JSON, exact SHA-256 pins for four local artifacts and a matching plan.
+It never opens SSH, invokes kubeadm/kubectl/Ansible or changes the host. Even a
+matching digest and clean reported state produce `BLOCKED`, exit code 3.
+`step5-phase-rehearsal` simulates kubeadm -> Calico -> validation ordering and
+fault stops without performing any commands. See
+[Step5 phase gate report](docs/step9/SEC801_STEP5_PHASE_GATE_2026-10-17.md).
