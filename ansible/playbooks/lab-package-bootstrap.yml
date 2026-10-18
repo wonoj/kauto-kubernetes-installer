@@ -1,0 +1,232 @@
+---
+# Independent, mutation-capable LAB prototype. NOT called by public Kauto CLI.
+# Designed only for two confirmed disposable Ubuntu 22.04 amd64 VMs.
+# No automatic reset, overwrite, retry or existing-cluster adoption.
+- name: Bootstrap pinned Kubernetes APT repository and crictl (DISPOSABLE LAB ONLY)
+  hosts: kauto_lab_targets
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    kauto_bootstrap_repository: https://pkgs.k8s.io/core:/stable:/v1.37/deb/
+    kauto_bootstrap_keyring: /etc/apt/keyrings/kauto-kubernetes-v1.37.gpg
+    kauto_bootstrap_source_list: /etc/apt/sources.list.d/kauto-kubernetes-v1.37.list
+    kauto_bootstrap_staging: /var/lib/kauto/lab-package-bootstrap
+    kauto_bootstrap_crictl_url: https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.37.0/crictl-v1.37.0-linux-amd64.tar.gz
+    # GitHub v1.37.0 release asset hash. The Release.key hash must be independently verified and passed in.
+    kauto_bootstrap_crictl_sha256: 67c983ee8a6bbce73d39a186e633c5fe4f8a70e62171ac3bd92a9c1b2c601670
+  tasks:
+    - name: Require explicit lab approval and narrow target identity
+      ansible.builtin.assert:
+        that:
+          - kauto_bootstrap_ack | default('') == 'LAB_PACKAGE_BOOTSTRAP_APPROVED'
+          - kauto_bootstrap_disposable_ack | default('') == 'TARGETS_ARE_DISPOSABLE_VMS'
+          - kauto_bootstrap_target_ip is defined
+          - kauto_bootstrap_target_ip in (ansible_all_ipv4_addresses | default([]))
+          - inventory_hostname in ['cp-01', 'worker-01']
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '22.04'
+          - ansible_architecture == 'x86_64'
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+          - kauto_bootstrap_release_key_sha256 is defined
+          - kauto_bootstrap_release_key_sha256 is match('^[a-f0-9]{64}$')
+          - kauto_bootstrap_crictl_sha256 == '67c983ee8a6bbce73d39a186e633c5fe4f8a70e62171ac3bd92a9c1b2c601670'
+          - kauto_bootstrap_kube_apt_version is defined
+          - kauto_bootstrap_kube_apt_version is match('^1\\.37\\.1-[A-Za-z0-9.+:~_-]+$')
+          - kauto_bootstrap_containerd_version is defined
+          - kauto_bootstrap_containerd_version is match('^[0-9][A-Za-z0-9.+:~_-]{0,119}$')
+        fail_msg: Missing exact pins or verified disposable VM identity; no changes allowed.
+
+    - name: Check for existing or partial Kubernetes bootstrap state
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/etcd/member
+        - /etc/cni/net.d/10-calico.conflist
+      register: kauto_bootstrap_cluster_markers
+
+    - name: Refuse hosts with existing or uninspectable cluster files
+      ansible.builtin.assert:
+        that:
+          - (kauto_bootstrap_cluster_markers.results | selectattr('stat.exists') | list | length) == 0
+          - (kauto_bootstrap_cluster_markers.results | selectattr('failed', 'defined') | selectattr('failed') | list | length) == 0
+        fail_msg: Existing Kubernetes/CNI state detected; stop without changes.
+
+    - name: Check CNI configuration directory exists
+      ansible.builtin.stat:
+        path: /etc/cni/net.d
+        follow: false
+      register: kauto_bootstrap_cni_dir
+
+    - name: List all existing CNI configuration entries
+      ansible.builtin.find:
+        paths: /etc/cni/net.d
+        file_type: any
+        hidden: true
+        recurse: false
+      when: kauto_bootstrap_cni_dir.stat.isdir | default(false)
+      register: kauto_bootstrap_cni_entries
+
+    - name: Reject foreign CNI configuration before any host changes
+      ansible.builtin.assert:
+        that:
+          - (kauto_bootstrap_cni_entries.matched | default(0) | int) == 0
+        fail_msg: Foreign CNI configuration detected; no implicit takeover.
+
+    - name: Inspect existing APT and crictl destinations
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - '{{ kauto_bootstrap_keyring }}'
+        - '{{ kauto_bootstrap_source_list }}'
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        - /usr/local/bin/crictl
+        - /usr/bin/crictl
+        - '{{ kauto_bootstrap_staging }}'
+      register: kauto_bootstrap_owned_paths
+
+    - name: Refuse preexisting package sources, crictl or prior partial attempt
+      ansible.builtin.assert:
+        that:
+          - (kauto_bootstrap_owned_paths.results | selectattr('stat.exists') | list | length) == 0
+        fail_msg: Existing or partial package bootstrap detected; manual review required.
+
+    - name: Check that required APT and archive tools are already present
+      ansible.builtin.command:
+        argv: [/usr/bin/which, '{{ item }}']
+      loop: [apt-cache, apt-get, gpg, tar, python3]
+      changed_when: false
+
+    - name: Check whether an existing crictl is already on PATH
+      ansible.builtin.command:
+        argv: [/usr/bin/which, crictl]
+      register: kauto_bootstrap_existing_crictl
+      changed_when: false
+      failed_when: false
+
+    - name: Reject an existing crictl outside the standard file paths
+      ansible.builtin.assert:
+        that:
+          - kauto_bootstrap_existing_crictl.rc != 0
+        fail_msg: Existing crictl requires review and must not be replaced.
+
+    - name: Require exact containerd package in existing trusted Ubuntu sources
+      ansible.builtin.command:
+        argv: [apt-cache, show, 'containerd={{ kauto_bootstrap_containerd_version }}']
+      changed_when: false
+
+    - name: Simulate containerd resolution without installing anything
+      ansible.builtin.command:
+        argv: [apt-get, '-s', install, 'containerd={{ kauto_bootstrap_containerd_version }}']
+      register: kauto_bootstrap_containerd_sim
+      changed_when: false
+
+    - name: Refuse proposed package removal during containerd simulation
+      ansible.builtin.assert:
+        that:
+          - not (kauto_bootstrap_containerd_sim.stdout is search('(?m)^(Remv|Purg) '))
+
+    # STAGE B: only the confirmed, disposable target is modified below.
+    - name: Make private staging directory
+      ansible.builtin.file:
+        path: '{{ kauto_bootstrap_staging }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Fetch exact pinned repository signing key
+      ansible.builtin.get_url:
+        url: '{{ kauto_bootstrap_repository }}Release.key'
+        dest: '{{ kauto_bootstrap_staging }}/Release.key'
+        checksum: 'sha256:{{ kauto_bootstrap_release_key_sha256 }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+
+    - name: Fetch pinned official crictl v1.37.0 archive
+      ansible.builtin.get_url:
+        url: '{{ kauto_bootstrap_crictl_url }}'
+        dest: '{{ kauto_bootstrap_staging }}/crictl.tar.gz'
+        checksum: 'sha256:{{ kauto_bootstrap_crictl_sha256 }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+
+    - name: Verify archive has exactly the expected crictl entry
+      ansible.builtin.command:
+        argv: [tar, -tzf, '{{ kauto_bootstrap_staging }}/crictl.tar.gz']
+      register: kauto_bootstrap_archive_entries
+      changed_when: false
+
+    - name: Reject extra archive files and paths
+      ansible.builtin.assert:
+        that:
+          - kauto_bootstrap_archive_entries.stdout_lines in [['crictl'], ['./crictl']]
+        fail_msg: Untrusted crictl archive layout.
+
+    - name: Prepare dedicated APT keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Convert verified signing key to APT keyring without overwriting
+      ansible.builtin.command:
+        argv: [gpg, --batch, --yes, --dearmor, --output, '{{ kauto_bootstrap_keyring }}', '{{ kauto_bootstrap_staging }}/Release.key']
+        creates: '{{ kauto_bootstrap_keyring }}'
+      environment:
+        GNUPGHOME: '{{ kauto_bootstrap_staging }}'
+
+    - name: Ensure APT can read the new keyring
+      ansible.builtin.file:
+        path: '{{ kauto_bootstrap_keyring }}'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Add the isolated Kubernetes v1.37 APT source
+      ansible.builtin.copy:
+        dest: '{{ kauto_bootstrap_source_list }}'
+        content: "deb [signed-by={{ kauto_bootstrap_keyring }}] {{ kauto_bootstrap_repository }} /\n"
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+
+    - name: Refresh package index for newly added signed repository
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Confirm kubeadm, kubelet and kubectl exact pinned APT versions
+      ansible.builtin.command:
+        argv: [apt-cache, show, '{{ item }}={{ kauto_bootstrap_kube_apt_version }}']
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false
+
+    - name: Extract only checksum-verified crictl binary
+      ansible.builtin.unarchive:
+        src: '{{ kauto_bootstrap_staging }}/crictl.tar.gz'
+        dest: /usr/local/bin
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Verify crictl is callable without a running container runtime
+      ansible.builtin.command:
+        argv: [/usr/local/bin/crictl, --version]
+      changed_when: false
