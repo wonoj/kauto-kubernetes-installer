@@ -1,0 +1,155 @@
+---
+# LAB ONLY. Never called automatically by the public Kauto CLI.
+# Requires independently authorized, freshly inspected disposable Worker VM.
+- name: Join exactly one approved disposable Kubernetes Worker
+  hosts: kauto_lab_worker
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Enforce strict SSH and exactly one worker
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+          - groups['kauto_lab_worker'] | length == 1
+          - inventory_hostname == 'worker-01'
+          - kauto_join_ack | default('') == 'DISPOSABLE_WORKER_JOIN_APPROVED'
+          - kauto_join_target_ip is defined
+          - kauto_join_target_ip in (ansible_all_ipv4_addresses | default([]))
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '22.04'
+          - ansible_architecture == 'x86_64'
+          - kauto_join_config_source is defined
+          - kauto_join_config_source is match('^/[A-Za-z0-9/_.-]+$')
+          - kauto_join_config_sha256 is defined
+          - kauto_join_config_sha256 is match('^[a-f0-9]{64}$')
+          - kauto_join_control_plane_endpoint is defined
+          - kauto_join_control_plane_endpoint is match('^[0-9.]+:[0-9]{2,5}$')
+          - kauto_join_ca_hash is defined
+          - kauto_join_ca_hash is match('^sha256:[a-f0-9]{64}$')
+        fail_msg: Worker approval, strict identity, or pinned join configuration missing.
+
+    - name: Refuse existing Kubernetes node state
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/bootstrap-kubelet.conf
+        - /var/lib/kubelet/config.yaml
+        - /etc/kubernetes/pki/ca.crt
+      register: kauto_join_existing
+
+    - name: Refuse existing or partial node installation
+      ansible.builtin.assert:
+        that:
+          - (kauto_join_existing.results | selectattr('stat.exists') | list | length) == 0
+        fail_msg: Partial or existing Kubernetes node cannot be adopted or reset automatically.
+
+    - name: Verify independent controller-side join config digest
+      ansible.builtin.assert:
+        that:
+          - (lookup('ansible.builtin.file', kauto_join_config_source, rstrip=False) | hash('sha256')) == kauto_join_config_sha256
+        fail_msg: Join configuration digest mismatch.
+      no_log: true
+
+    # Never accept an opaque join configuration merely because its bytes match
+    # a caller-supplied digest. Bind the token discovery to an independently
+    # approved CP endpoint and CA public-key pin before touching the worker.
+    - name: Parse controller-local join configuration privately
+      ansible.builtin.set_fact:
+        kauto_join_document: "{{ lookup('ansible.builtin.file', kauto_join_config_source, rstrip=False) | from_yaml }}"
+      no_log: true
+
+    - name: Reject unsupported or insecure join configuration
+      ansible.builtin.assert:
+        that:
+          - kauto_join_document is mapping
+          - kauto_join_document.apiVersion | default('') == 'kubeadm.k8s.io/v1beta4'
+          - kauto_join_document.kind | default('') == 'JoinConfiguration'
+          - kauto_join_document.discovery.bootstrapToken.apiServerEndpoint | default('') == kauto_join_control_plane_endpoint
+          - kauto_join_document.discovery.bootstrapToken.caCertHashes | default([]) == [kauto_join_ca_hash]
+          - kauto_join_document.discovery.bootstrapToken.token | default('') is match('^[a-z0-9]{6}\\.[a-z0-9]{16}$')
+          - not (kauto_join_document.discovery.bootstrapToken.unsafeSkipCAVerification | default(false) | bool)
+          - kauto_join_document.nodeRegistration.criSocket | default('') == 'unix:///run/containerd/containerd.sock'
+          - kauto_join_document.controlPlane is not defined
+        fail_msg: Invalid join configuration; endpoint, CA pin or CRI does not match operator approval.
+      no_log: true
+
+    - name: Reject any earlier local join attempt
+      ansible.builtin.stat:
+        path: /var/lib/kauto/join/attempted
+        follow: false
+      register: kauto_join_attempted
+
+    - name: Deny retries or uncertain join state
+      ansible.builtin.assert:
+        that:
+          - not (kauto_join_attempted.stat.exists | default(false))
+        fail_msg: Previous worker join attempt requires manual review; automatic retry denied.
+
+    - name: Verify preinstalled kubeadm and container runtime
+      ansible.builtin.command:
+        argv: [kubeadm, version, -o, short]
+      changed_when: false
+      register: kauto_join_kubeadm_version
+
+    - name: Require exact approved kubeadm version
+      ansible.builtin.assert:
+        that:
+          - kauto_join_kubeadm_version.stdout | trim == kauto_join_kube_version
+          - kauto_join_kube_version == 'v1.37.1'
+
+    - name: Require CRI v1 runtime
+      ansible.builtin.command:
+        argv: [crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, version, -o, json]
+      changed_when: false
+      register: kauto_join_cri
+
+    - name: Check CRI API version
+      ansible.builtin.assert:
+        that:
+          - (kauto_join_cri.stdout | from_json).runtimeApiVersion == 'v1'
+
+  tasks:
+    - name: Stage, join, and always remove short-lived credentials
+      block:
+        - name: Create root-private join staging directory
+          ansible.builtin.file:
+            path: /var/lib/kauto/join
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Persist one-shot join attempt before copying credentials
+          ansible.builtin.copy:
+            content: 'ATTEMPTED - manual review required before retry\n'
+            dest: /var/lib/kauto/join/attempted
+            owner: root
+            group: root
+            mode: '0600'
+            force: false
+
+        - name: Copy independently pinned join config without logging credentials
+          ansible.builtin.copy:
+            src: '{{ kauto_join_config_source }}'
+            dest: /var/lib/kauto/join/join.yaml
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Execute one-shot worker join without leaking token
+          ansible.builtin.command:
+            argv: [kubeadm, join, --config, /var/lib/kauto/join/join.yaml]
+          no_log: true
+          changed_when: true
+      always:
+        - name: Remove temporary join credentials
+          ansible.builtin.file:
+            path: /var/lib/kauto/join/join.yaml
+            state: absent
+          no_log: true
