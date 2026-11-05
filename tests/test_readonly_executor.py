@@ -123,6 +123,7 @@ def test_invalid_run_id_cannot_traverse(tmp_path,resolved,simple_plan):
 def test_private_state_dir_rejects_world_readable(tmp_path,resolved,simple_plan):
     d=tmp_path/'state'
     d.mkdir(mode=0o755)
+    d.chmod(0o755)
     with pytest.raises(ExecutionBlocked, match='0700'):
         run_readonly_boundary(simple_plan,resolved,acknowledgement=simple_plan['planFingerprintSha256'],
                               state_dir=d,run_id='a')

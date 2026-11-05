@@ -1,0 +1,335 @@
+---
+# EXPERIMENTAL two-node clean-host installer. Run only through explicit Kauto lab confirmation.
+# Full target preflight completes on both nodes before any mutating play starts.
+- name: Verify both clean Ubuntu targets (read-only)
+  hosts: kauto_lab_mvp_nodes
+  gather_facts: true
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Verify exact lab inventory and target identity
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_HOST_KEY_CHECKING') == 'True'
+          - groups['kauto_lab_mvp_cp'] | length == 1
+          - groups['kauto_lab_mvp_worker'] | length == 1
+          - groups['kauto_lab_mvp_nodes'] | length == 2
+          - kauto_mvp_ack | default('') == 'DISPOSABLE_TWO_NODE_LAB'
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version in ['22.04', '24.04']
+          - ansible_architecture == 'x86_64'
+          - ansible_processor_vcpus | int >= 2
+          - ansible_memtotal_mb | int >= 2048
+          - kauto_mvp_node_ip in (ansible_all_ipv4_addresses | default([]))
+          - ansible_mounts | selectattr('mount','equalto','/') | list | length == 1
+        fail_msg: Unsupported, ambiguously addressed or unapproved target.
+    - name: Check cluster and CNI markers
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/etcd/member
+        - /etc/cni/net.d/10-calico.conflist
+        - /etc/apt/sources.list.d/kauto-kubernetes.list
+        - /etc/apt/keyrings/kauto-release.asc
+        - /etc/containerd/config.toml
+      register: kauto_markers
+    - name: Reject existing or partial clusters
+      ansible.builtin.assert:
+        that:
+          - kauto_markers.results | selectattr('stat.exists') | list | length == 0
+    - name: Inspect existing CNI entries
+      ansible.builtin.stat:
+        path: /etc/cni/net.d
+      register: kauto_cni_dir
+    - name: Look for foreign CNI entries
+      ansible.builtin.find:
+        paths: /etc/cni/net.d
+        file_type: any
+        hidden: true
+      when: kauto_cni_dir.stat.isdir | default(false)
+      register: kauto_cni_entries
+    - name: Refuse foreign CNI configuration
+      ansible.builtin.assert:
+        that:
+          - kauto_cni_entries.matched | default(0) | int == 0
+    - name: Require sufficient free filesystem space
+      ansible.builtin.assert:
+        that:
+          - ((ansible_mounts | selectattr('mount','equalto','/') | first).size_available | int) >= 10737418240
+    - name: Check UFW state
+      ansible.builtin.command: ufw status
+      changed_when: false
+      failed_when: false
+      register: kauto_ufw
+    - name: Do not alter existing firewall policy
+      ansible.builtin.assert:
+        that:
+          - kauto_ufw.stdout is not search('(?m)^Status: active')
+    - name: Check current Kubernetes and runtime packages
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Status}', '{{ item }}']
+      changed_when: false
+      failed_when: false
+      loop: [kubeadm, kubelet, kubectl, containerd, containerd.io]
+      register: kauto_existing_packages
+    - name: Refuse existing Kubernetes or containerd package adoption in MVP
+      ansible.builtin.assert:
+        that:
+          - kauto_existing_packages.results | selectattr('stdout','search','install ok installed') | list | length == 0
+        fail_msg: Existing packages need independent review; this installer supports clean hosts only.
+
+- name: Install containerd and Kubernetes packages on both nodes
+  hosts: kauto_lab_mvp_nodes
+  gather_facts: false
+  become: true
+  become_flags: '-n'
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Install baseline utilities from Ubuntu repositories
+      ansible.builtin.apt:
+        update_cache: true
+        name: [ca-certificates, curl, gnupg, apt-transport-https, containerd]
+        state: present
+    - name: Configure Kubernetes kernel modules
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/kauto-k8s.conf
+        mode: '0644'
+        content: "overlay\nbr_netfilter\n"
+    - name: Load overlay and br_netfilter modules
+      ansible.builtin.command:
+        argv: [modprobe, "{{ item }}"]
+      changed_when: true
+      loop: [overlay, br_netfilter]
+    - name: Configure required forwarding and bridge sysctl
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-kauto-kubernetes.conf
+        mode: '0644'
+        content: |
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-iptables = 1
+    - name: Apply kernel network sysctls
+      ansible.builtin.command: sysctl --system
+      changed_when: true
+    - name: Turn off active swap for kubelet
+      ansible.builtin.command: swapoff -a
+      changed_when: true
+    - name: Disable swap entries on next boot
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(?!#)(\S+\s+\S+\s+swap\s+\S+.*)$'
+        replace: '# \1'
+        backup: true
+    - name: Obtain default containerd configuration
+      ansible.builtin.command: containerd config default
+      changed_when: false
+      register: kauto_containerd_default
+    - name: Create containerd configuration directory
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+    - name: Configure containerd systemd cgroups
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        mode: '0644'
+        content: "{{ kauto_containerd_default.stdout | regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}\n"
+    - name: Start containerd with new configuration
+      ansible.builtin.systemd_service:
+        name: containerd
+        enabled: true
+        state: restarted
+    - name: Create isolated APT keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+    - name: Fetch pinned Kubernetes signing key
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/{{ kauto_mvp_kube_minor }}/deb/Release.key"
+        dest: /etc/apt/keyrings/kauto-release.asc
+        mode: '0644'
+        checksum: 'sha256:{{ kauto_mvp_release_key_sha256 }}'
+    - name: Install signed Kubernetes APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kauto-kubernetes.list
+        mode: '0644'
+        content: "deb [signed-by=/etc/apt/keyrings/kauto-release.asc] https://pkgs.k8s.io/core:/stable:/{{ kauto_mvp_kube_minor }}/deb/ /\n"
+    - name: Install exact Kubernetes package revisions
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - "kubelet={{ kauto_mvp_kube_apt_version }}"
+          - "kubeadm={{ kauto_mvp_kube_apt_version }}"
+          - "kubectl={{ kauto_mvp_kube_apt_version }}"
+        state: present
+    - name: Enable kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        enabled: true
+
+- name: Initialize the control plane and install pinned Calico manifests
+  hosts: kauto_lab_mvp_cp
+  gather_facts: false
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Initialize one control plane
+      ansible.builtin.command:
+        argv: [kubeadm, init, '--apiserver-advertise-address={{ kauto_mvp_node_ip }}',
+               '--pod-network-cidr={{ kauto_mvp_pod_cidr }}',
+               '--service-cidr={{ kauto_mvp_service_cidr }}',
+               --cri-socket=unix:///run/containerd/containerd.sock, --skip-token-print]
+      no_log: true
+    - name: Wait for Kubernetes API readiness
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, --raw=/readyz]
+      changed_when: false
+      register: kauto_api
+      retries: 30
+      delay: 5
+      until: kauto_api.rc == 0
+    - name: Stage independently verified Calico CRDs
+      ansible.builtin.copy:
+        src: '{{ kauto_mvp_calico_crds_file }}'
+        dest: /root/kauto-calico-crds.yaml
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Install required Calico CRDs before operator
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf,
+               apply, --server-side, -f, /root/kauto-calico-crds.yaml]
+      changed_when: true
+    - name: Stage operator manifest verified on the controller
+      ansible.builtin.copy:
+        src: '{{ kauto_mvp_calico_operator_file }}'
+        dest: /root/kauto-calico-operator.yaml
+        mode: '0600'
+    - name: Apply pinned Calico operator manifest
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, -f, /root/kauto-calico-operator.yaml]
+    - name: Wait for Calico operator
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, tigera-operator,
+               rollout, status, deployment/tigera-operator, --timeout=300s]
+      changed_when: false
+    - name: Write Calico installation for selected Pod CIDR
+      ansible.builtin.copy:
+        dest: /root/kauto-calico-installation.yaml
+        mode: '0600'
+        content: |
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              bgp: Disabled
+              linuxDataplane: Iptables
+              ipPools:
+                - blockSize: 26
+                  cidr: {{ kauto_mvp_pod_cidr }}
+                  encapsulation: VXLAN
+                  natOutgoing: Enabled
+                  nodeSelector: all()
+    - name: Apply Calico custom resource
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply,
+               -f, /root/kauto-calico-installation.yaml]
+    - name: Wait for Calico CNI
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system,
+               rollout, status, daemonset/calico-node, --timeout=600s]
+      changed_when: false
+
+- name: Join the worker and revoke its temporary token
+  hosts: kauto_lab_mvp_worker
+  gather_facts: false
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Create temporary bootstrap join command, use it and revoke its token
+      block:
+        - name: Generate a short-lived join command on control plane
+          ansible.builtin.command:
+            argv: [kubeadm, token, create, --ttl=10m, --print-join-command]
+          delegate_to: '{{ groups["kauto_lab_mvp_cp"][0] }}'
+          register: kauto_join_cmd
+          no_log: true
+        - name: Validate generated command structure
+          ansible.builtin.assert:
+            that:
+              - kauto_join_cmd.stdout is match('^kubeadm join [A-Za-z0-9.-]+:[0-9]+ --token [a-z0-9]{6}\.[a-z0-9]{16} --discovery-token-ca-cert-hash sha256:[a-f0-9]{64}$')
+              - kauto_lab_mvp_cp_endpoint in kauto_join_cmd.stdout
+          no_log: true
+        - name: Join worker without shell interpretation or credential output
+          ansible.builtin.command:
+            argv:
+              - kubeadm
+              - join
+              - '{{ kauto_lab_mvp_cp_endpoint }}'
+              - --token
+              - "{{ kauto_join_cmd.stdout.split('--token ')[1].split()[0] }}"
+              - --discovery-token-ca-cert-hash
+              - "{{ kauto_join_cmd.stdout.split('--discovery-token-ca-cert-hash ')[1].split()[0] }}"
+              - --cri-socket
+              - unix:///run/containerd/containerd.sock
+          no_log: true
+      always:
+        - name: Revoke temporary join token
+          ansible.builtin.command:
+            argv: [kubeadm, token, delete,
+                   "{{ kauto_join_cmd.stdout.split('--token ')[1].split('.')[0] }}"]
+          delegate_to: '{{ groups["kauto_lab_mvp_cp"][0] }}'
+          when:
+            - kauto_join_cmd is defined
+            - kauto_join_cmd.stdout is defined
+            - kauto_join_cmd.stdout is search('--token [a-z0-9]{6}\\.')
+          no_log: true
+
+- name: Verify both nodes and essential system components
+  hosts: kauto_lab_mvp_cp
+  gather_facts: false
+  become: true
+  become_flags: '-n'
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm both nodes are Ready
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf,
+               wait, --for=condition=Ready, nodes, --all, --timeout=600s]
+      changed_when: false
+    - name: Read the full node identities for exact two-node acceptance
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf,
+               get, nodes, -o, json]
+      register: kauto_mvp_nodes_json
+      changed_when: false
+    - name: Require exactly the originally observed CP and Worker identities
+      ansible.builtin.assert:
+        that:
+          - (kauto_mvp_nodes_json.stdout | from_json).items | length == 2
+          - ((kauto_mvp_nodes_json.stdout | from_json).items | map(attribute='metadata.name') | sort | list) == ([hostvars[groups['kauto_lab_mvp_cp'][0]].ansible_hostname, hostvars[groups['kauto_lab_mvp_worker'][0]].ansible_hostname] | sort | list)
+        fail_msg: The two Ready nodes must be the exact preflight-identified CP and Worker.
+    - name: Confirm CoreDNS deployment
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, kube-system,
+               rollout, status, deployment/coredns, --timeout=300s]
+      changed_when: false
+    - name: List Kubernetes nodes after install
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, nodes, -o, wide]
+      changed_when: false
+      register: kauto_mvp_result
+    - name: Show final node overview
+      ansible.builtin.debug:
+        var: kauto_mvp_result.stdout_lines

@@ -1,3 +1,19 @@
+# Kauto 0.9.0a10 — unreleased CIDR-reservation candidate
+
+The experimental two-node CLI adds repeatable `--reserved-cidr` to
+`quickstart-plan` **and** `install`. Operators must declare networks belonging
+to other clusters, VPNs or routing domains that the two fresh VMs cannot detect.
+For example, reserve `10.244.0.0/16` and `10.96.0.0/12` to avoid the existing
+cluster when planning the separate VM 110/111 lab. See
+[CIDR reservation review](docs/step9/CIDR_RESERVATION_PATCH.md).
+
+**NOT PUBLISHED; NOT INSTALL APPROVED.** This change has offline regression tests,
+not an actual VM installation acceptance result. The already-published
+`v0.9.0a9` tag remains unchanged; do not run `install --apply` until all
+installation gates, host snapshots and artifact/compatibility review pass.
+
+---
+
 # Unreleased 0.9.0a3 candidate — SEC-801 operator gate and OFFLINE DAG rehearsal
 
 The added `apply-gate` performs strict plan, acknowledgement and version-lock review;

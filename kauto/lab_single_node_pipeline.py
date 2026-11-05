@@ -28,9 +28,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PREFLIGHT = ROOT / 'ansible/playbooks/lab-single-node-source-preflight.yml'
 PREREQ = ROOT / 'ansible/playbooks/lab-single-node-prerequisites.yml'
 STEP5 = ROOT / 'ansible/playbooks/step5-kubeadm-calico.yml'
+BOOTSTRAP = ROOT / 'ansible/playbooks/lab-package-bootstrap.yml'
 SCHEMA = 'kauto.lab-single-node-pipeline/v1alpha1'
 APT = re.compile(r'^1\.37\.1-[A-Za-z0-9.+:~_-]+$')
 RUN_ID = re.compile(r'^[a-z][a-z0-9-]{0,50}$')
+SHA256 = re.compile(r'^[a-f0-9]{64}$')
 
 
 def _admit(plan, resolved, *, acknowledgement, node_id, pins, artifact_dir,
@@ -80,6 +82,53 @@ def review_single_node_lab(plan, resolved, *, acknowledgement, node_id, pins,
                                     'No disposable Ubuntu VM acceptance evidence exists']}
 
 
+
+def _post_bootstrap_facts(report, resolved, node_id):
+    """Require a fresh, clean VM; do NOT reuse the pre-Bootstrap facts digest."""
+    problems = verify_report_binding(resolved, report)
+    rows = report.get('nodes') if isinstance(report, dict) else None
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        return problems + ['Exactly one post-Bootstrap SSH observation required']
+    row = rows[0]
+    inventory_node = resolved.inventory['nodes'][0]
+    if (row.get('id') != node_id or row.get('role') != 'control-plane' or
+            row.get('address') != inventory_node['address'] or
+            row.get('probeStatus') != 'PASS'):
+        problems.append('Post-Bootstrap node identity or probe mismatch')
+    facts = row.get('facts')
+    if not isinstance(facts, dict):
+        return problems + ['Post-Bootstrap facts unavailable']
+    if (facts.get('os_id') != 'ubuntu' or facts.get('os_version') != '22.04' or
+            facts.get('infrastructure', {}).get('type') != 'vm' or
+            facts.get('sudoNonInteractive') is not True):
+        problems.append('Post-Bootstrap OS, VM or sudo mismatch')
+    runtime = facts.get('containerd')
+    if (not isinstance(runtime, dict) or runtime.get('binaryPresent') is not False or
+            runtime.get('socketPresent') is not False):
+        problems.append('Unexpected containerd installation after package bootstrap')
+    markers = facts.get('kubernetes')
+    if (not isinstance(markers, dict) or any(markers.get(k) is not False for k in
+            ('adminConf', 'kubeletConf', 'controlPlaneStaticPod'))):
+        problems.append('Unexpected Kubernetes bootstrap markers')
+    checks = row.get('checks')
+    if not isinstance(checks, list) or not any(
+            isinstance(c, dict) and c.get('code') == 'EXISTING_K8S' and c.get('result') == 'PASS'
+            for c in checks):
+        problems.append('Clean-cluster check unavailable')
+    if isinstance(checks, list) and any(
+            not isinstance(c, dict) or c.get('result') in ('FAIL', 'BLOCK') for c in checks):
+        problems.append('Post-Bootstrap discovery contains failed checks')
+    # Step2 and unsupported stack remain blockers; do not convert them to authorization.
+    blockers = report.get('blockers')
+    expected = {
+        'No matching evidence-backed, fully pinned SUPPORTED stack',
+        'Step 2 has no approved installation executor or full cross-node preflight',
+    }
+    if not isinstance(blockers, list) or any(b not in expected for b in blockers):
+        problems.append('Unexpected post-Bootstrap discovery blocker')
+    return list(dict.fromkeys(problems))
+
+
 def _post_step4_facts(report, resolved, node_id):
     problems = verify_report_binding(resolved, report)
     rows = report.get('nodes') if isinstance(report, dict) else None
@@ -110,7 +159,7 @@ def _post_step4_facts(report, resolved, node_id):
 
 
 def _inventory_and_env(resolved, node, *, pin, artifact_dir, pins, inventory_file,
-                       kube_apt_version):
+                       kube_apt_version, bootstrap_key_sha256=None):
     _, env, base = _make_argv(resolved, node, pin=pin, inventory_file=inventory_file)
     inventory = yaml.safe_load(base)
     existing = inventory['all']['children']['kauto_lab_targets']['hosts'][node['id']]
@@ -128,6 +177,15 @@ def _inventory_and_env(resolved, node, *, pin, artifact_dir, pins, inventory_fil
         'kauto_step5_single_node': True,
         'kauto_step5_single_node_ack': 'SINGLE_NODE_CONTROL_PLANE_SCHEDULING_APPROVED',
     })
+    if bootstrap_key_sha256 is not None:
+        existing.update({
+            'kauto_bootstrap_ack': 'LAB_PACKAGE_BOOTSTRAP_APPROVED',
+            'kauto_bootstrap_disposable_ack': 'TARGETS_ARE_DISPOSABLE_VMS',
+            'kauto_bootstrap_target_ip': existing['ansible_host'],
+            'kauto_bootstrap_release_key_sha256': bootstrap_key_sha256,
+            'kauto_bootstrap_kube_apt_version': kube_apt_version,
+            'kauto_bootstrap_containerd_version': pin,
+        })
     inventory['all']['children']['kauto_lab_control_plane'] = {'hosts': {node['id']: existing}}
     return yaml.safe_dump(inventory, sort_keys=True), env
 
@@ -138,7 +196,9 @@ def run_single_node_lab_internal(plan, resolved, *, acknowledgement: str,
                                  confirmation: str, state_dir: Path, run_id: str,
                                  step4: Callable = run_step4_lab_internal,
                                  collector: Callable = discover,
-                                 runner: Callable = subprocess.run):
+                                 runner: Callable = subprocess.run,
+                                 package_bootstrap: bool = False,
+                                 bootstrap_key_sha256: str | None = None):
     """Opt-in INTERNAL VM-lab runner. Real callbacks can change a disposable VM.
 
     Fail-stop at every stage. Never infer health or release readiness from exit zero.
@@ -149,6 +209,14 @@ def run_single_node_lab_internal(plan, resolved, *, acknowledgement: str,
     errors = _admit(plan, resolved, acknowledgement=acknowledgement,
                     node_id=node_id, pins=pins, artifact_dir=artifact_dir,
                     kube_apt_version=kube_apt_version, confirmation=confirmation)
+    if package_bootstrap:
+        if (not isinstance(bootstrap_key_sha256, str) or
+                not SHA256.fullmatch(bootstrap_key_sha256)):
+            errors.append('Independent 64-character repository key SHA-256 required')
+        if not BOOTSTRAP.is_file() or BOOTSTRAP.is_symlink():
+            errors.append('Pinned local Bootstrap playbook missing or symlinked')
+    elif bootstrap_key_sha256 is not None:
+        errors.append('Bootstrap key pin supplied without explicit package_bootstrap opt-in')
     if errors:
         return {'schemaVersion':SCHEMA, 'status':'BLOCKED_PRE_ADMISSION',
                 'applyAuthorized':False, 'executionPerformed':False, 'blockers':errors}
@@ -182,7 +250,8 @@ def run_single_node_lab_internal(plan, resolved, *, acknowledgement: str,
         try:
             payload, env = _inventory_and_env(resolved, resolved.inventory['nodes'][0],
                 pin=containerd_apt_version, artifact_dir=artifact_dir, pins=pins,
-                inventory_file=inventory_file, kube_apt_version=kube_apt_version)
+                inventory_file=inventory_file, kube_apt_version=kube_apt_version,
+                bootstrap_key_sha256=bootstrap_key_sha256 if package_bootstrap else None)
             with os.fdopen(fd, 'w') as f:
                 f.write(payload)
                 f.flush()
@@ -202,7 +271,26 @@ def run_single_node_lab_internal(plan, resolved, *, acknowledgement: str,
                 good = False
             record(stage, 'RETURNED_ZERO_UNVERIFIED' if good else 'HALTED')
             return good
-        # Detect missing APT sources/crictl before touching the host.
+        # Bootstrap changes host facts and so invalidates the original signed plan.
+        # Never feed the pre-Bootstrap approval to Step4's exact-facts gate.
+        if package_bootstrap:
+            if not invoke('PACKAGE_BOOTSTRAP', BOOTSTRAP):
+                return _result('BOOTSTRAP_HALTED_MANUAL_REVIEW', events)
+            if not invoke('POST_BOOTSTRAP_PREREQUISITES', SOURCE_PREFLIGHT):
+                return _result('BOOTSTRAP_PREREQUISITES_HALTED_MANUAL_REVIEW', events)
+            try:
+                refreshed = collector(resolved, timeout=35)
+                issues = _post_bootstrap_facts(refreshed, resolved, node_id)
+            except (OSError, ValueError, TypeError, KeyError):
+                issues = ['Post-Bootstrap authenticated SSH observation unavailable']
+            if issues:
+                record('POST_BOOTSTRAP_SSH', 'BLOCKED')
+                return _result('BOOTSTRAP_POSTCHECK_HALTED_MANUAL_REVIEW', events)
+            record('POST_BOOTSTRAP_SSH', 'PASS_REPLAN_REQUIRED')
+            # The protected one-shot journal remains final. A new reviewed,
+            # authenticated plan and independent resume protocol are required.
+            return _result('BOOTSTRAP_REPLAN_REQUIRED_NO_STEP4', events)
+        # Legacy already-provisioned-image path remains unchanged.
         if not invoke('PRE_MUTATION_PREREQUISITES', SOURCE_PREFLIGHT):
             return _result('PRE_MUTATION_HALTED_NO_HOST_MUTATION', events)
         # The stage4 adapter maintains an independent fsynced write-ahead journal.

@@ -1,3 +1,16 @@
+## 0.9.0a10 (unreleased candidate) — operator-declared CIDR reservations
+
+- Add repeatable `--reserved-cidr` to the two-node preview and installer; reject
+  malformed/noncanonical/non-IPv4 networks before SSH, and fail closed when no
+  Pod or Service CIDR candidate remains.
+- Pass the same reservation set into installer preflight and Ansible inventory;
+  record declared reservations in the review output.
+- Offline tests include existing-cluster collisions, CIDR exhaustion, input
+  validation, CLI parameter forwarding, and mock-only install inventory checks.
+- Does **not** discover external cluster CIDRs automatically, establish routing
+  safety, verify installation artifacts, or authorize installation.
+- Published `v0.9.0a9` is immutable and unaffected.
+
 ## 0.9.0a3 (unreleased, PR candidate) — SEC-801 partial
 
 - Add explicit plan-digest acknowledgement and deterministic catalog check before execution review.

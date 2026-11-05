@@ -23,6 +23,36 @@ ROOT = Path(__file__).resolve().parent
 def parser():
     p = argparse.ArgumentParser(prog='kauto', description='Kauto planning core (NO INSTALLATION)')
     sub = p.add_subparsers(dest='command', required=True)
+    quick = sub.add_parser('quickstart-check', help='Probe two Ubuntu nodes safely; no installation')
+    quick.add_argument('--control-plane', required=True)
+    quick.add_argument('--worker', required=True)
+    quick.add_argument('--ssh-user', required=True)
+    quick.add_argument('--known-hosts', required=True, type=Path)
+    quick.add_argument('--timeout', type=int, default=35)
+    qp = sub.add_parser('quickstart-plan', help='Probe two nodes and derive fail-closed network candidates; no installation')
+    qp.add_argument('--control-plane', required=True)
+    qp.add_argument('--worker', required=True)
+    qp.add_argument('--ssh-user', required=True)
+    qp.add_argument('--known-hosts', required=True, type=Path)
+    qp.add_argument('--timeout', type=int, default=35)
+    qp.add_argument('--reserved-cidr', action='append', default=[], metavar='IPV4_CIDR',
+                    help='Exclude a known existing IPv4 CIDR; repeat for other clusters/networks')
+    inst = sub.add_parser('install', help='EXPERIMENTAL clean two-node lab installer; read-only unless --apply')
+    inst.add_argument('--control-plane', required=True)
+    inst.add_argument('--worker', required=True)
+    inst.add_argument('--ssh-user', required=True)
+    inst.add_argument('--known-hosts', required=True, type=Path)
+    inst.add_argument('--kube-apt-version', required=True)
+    inst.add_argument('--release-key-sha256', required=True)
+    inst.add_argument('--calico-operator-file', required=True, type=Path)
+    inst.add_argument('--calico-operator-sha256', required=True)
+    inst.add_argument('--calico-crds-file', type=Path)
+    inst.add_argument('--calico-crds-sha256')
+    inst.add_argument('--state-dir', required=True, type=Path)
+    inst.add_argument('--reserved-cidr', action='append', default=[], metavar='IPV4_CIDR',
+                      help='Exclude a known existing IPv4 CIDR; repeat for other clusters/networks')
+    inst.add_argument('--apply', action='store_true')
+    inst.add_argument('--confirmation', default='')
     for name in ('validate', 'resolve', 'plan', 'discover', 'preflight'):
         cmd = sub.add_parser(name)
         cmd.add_argument('--cluster', required=True, type=Path)
@@ -214,7 +244,35 @@ def _load_plan(path):
 def main(argv=None):
     a = parser().parse_args(argv)
     try:
-        if a.command == 'multinode-preview':
+        if a.command == 'quickstart-check':
+            if not 10 <= a.timeout <= 120:
+                raise ValueError('timeout must be 10..120 seconds')
+            from .quickstart import inspect_two_nodes
+            result = inspect_two_nodes(a.control_plane, a.worker, user=a.ssh_user,
+                                       known_hosts=a.known_hosts, timeout=a.timeout)
+            code = 3 if result['status'] != 'BLOCKED' else 2
+        elif a.command == 'quickstart-plan':
+            if not 10 <= a.timeout <= 120:
+                raise ValueError('timeout must be 10..120 seconds')
+            from .quickstart_plan import build_quickstart_plan
+            result = build_quickstart_plan(a.control_plane, a.worker,
+                user=a.ssh_user, known_hosts=a.known_hosts, timeout=a.timeout,
+                reserved_cidrs=a.reserved_cidr)
+            code = 3 if result['status'] == 'REVIEW_REQUIRED' else 2
+        elif a.command == 'install':
+            from .mvp_install import install_two_nodes
+            result = install_two_nodes(a.control_plane, a.worker,
+                user=a.ssh_user, known_hosts=a.known_hosts,
+                kube_apt_version=a.kube_apt_version,
+                release_key_sha256=a.release_key_sha256,
+                calico_operator_file=a.calico_operator_file,
+                calico_operator_sha256=a.calico_operator_sha256,
+                calico_crds_file=a.calico_crds_file,
+                calico_crds_sha256=a.calico_crds_sha256,
+                state_dir=a.state_dir, apply=a.apply, confirmation=a.confirmation,
+                reserved_cidrs=a.reserved_cidr)
+            code = 3 if result['status'] in ('REVIEW_REQUIRED_NO_INSTALL', 'RETURNED_ZERO_REQUIRES_LIVE_ACCEPTANCE') else 2
+        elif a.command == 'multinode-preview':
             resolved = resolve(a.cluster, a.inventory, a.policy, a.set, a.allow_eol)
             report = load_report(a.preflight_report) if a.preflight_report else None
             preview, exported = build_multinode_preview(resolved, report)
