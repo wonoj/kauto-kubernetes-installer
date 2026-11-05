@@ -35,6 +35,8 @@ def parser():
     qp.add_argument('--ssh-user', required=True)
     qp.add_argument('--known-hosts', required=True, type=Path)
     qp.add_argument('--timeout', type=int, default=35)
+    qp.add_argument('--reserved-cidr', action='append', default=[], metavar='IPV4_CIDR',
+                    help='Exclude a known existing IPv4 CIDR; repeat for other clusters/networks')
     inst = sub.add_parser('install', help='EXPERIMENTAL clean two-node lab installer; read-only unless --apply')
     inst.add_argument('--control-plane', required=True)
     inst.add_argument('--worker', required=True)
@@ -47,6 +49,8 @@ def parser():
     inst.add_argument('--calico-crds-file', type=Path)
     inst.add_argument('--calico-crds-sha256')
     inst.add_argument('--state-dir', required=True, type=Path)
+    inst.add_argument('--reserved-cidr', action='append', default=[], metavar='IPV4_CIDR',
+                      help='Exclude a known existing IPv4 CIDR; repeat for other clusters/networks')
     inst.add_argument('--apply', action='store_true')
     inst.add_argument('--confirmation', default='')
     for name in ('validate', 'resolve', 'plan', 'discover', 'preflight'):
@@ -252,7 +256,8 @@ def main(argv=None):
                 raise ValueError('timeout must be 10..120 seconds')
             from .quickstart_plan import build_quickstart_plan
             result = build_quickstart_plan(a.control_plane, a.worker,
-                user=a.ssh_user, known_hosts=a.known_hosts, timeout=a.timeout)
+                user=a.ssh_user, known_hosts=a.known_hosts, timeout=a.timeout,
+                reserved_cidrs=a.reserved_cidr)
             code = 3 if result['status'] == 'REVIEW_REQUIRED' else 2
         elif a.command == 'install':
             from .mvp_install import install_two_nodes
@@ -264,7 +269,8 @@ def main(argv=None):
                 calico_operator_sha256=a.calico_operator_sha256,
                 calico_crds_file=a.calico_crds_file,
                 calico_crds_sha256=a.calico_crds_sha256,
-                state_dir=a.state_dir, apply=a.apply, confirmation=a.confirmation)
+                state_dir=a.state_dir, apply=a.apply, confirmation=a.confirmation,
+                reserved_cidrs=a.reserved_cidr)
             code = 3 if result['status'] in ('REVIEW_REQUIRED_NO_INSTALL', 'RETURNED_ZERO_REQUIRES_LIVE_ACCEPTANCE') else 2
         elif a.command == 'multinode-preview':
             resolved = resolve(a.cluster, a.inventory, a.policy, a.set, a.allow_eol)

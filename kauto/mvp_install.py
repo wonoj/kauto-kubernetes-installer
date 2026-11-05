@@ -54,6 +54,7 @@ def install_two_nodes(cp: str, worker: str, *, user: str, known_hosts: Path,
                       state_dir: Path, apply: bool = False, confirmation: str = '',
                       calico_crds_file: Path | None = None,
                       calico_crds_sha256: str | None = None,
+                      reserved_cidrs=(),
                       probe=None, runner=subprocess.run) -> dict:
     """Read-only by default; a uniquely confirmed call may change two servers."""
     if not APT_VERSION.fullmatch(kube_apt_version):
@@ -66,7 +67,8 @@ def install_two_nodes(cp: str, worker: str, *, user: str, known_hosts: Path,
         raise ValueError('Two distinct hosts required')
     if not all(isinstance(ipaddress.ip_address(ip), ipaddress.IPv4Address) for ip in (cp,worker)):
         raise ValueError('Explicit IPv4 node IPs required')
-    args = {'user': user, 'known_hosts': known_hosts}
+    args = {'user': user, 'known_hosts': known_hosts,
+            'reserved_cidrs': reserved_cidrs}
     if probe is not None:
         args['probe'] = probe
     plan = build_quickstart_plan(cp, worker, **args)

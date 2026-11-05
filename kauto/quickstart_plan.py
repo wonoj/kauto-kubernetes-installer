@@ -10,14 +10,39 @@ POD_OPTIONS = ('10.244.0.0/16', '10.245.0.0/16', '172.29.0.0/16')
 SERVICE_OPTIONS = ('10.96.0.0/12', '172.30.0.0/16')
 
 
+def _parse_reserved_cidrs(values):
+    """Validate explicit IPv4 network reservations before contacting any host."""
+    if not isinstance(values, (tuple, list)) or len(values) > 64:
+        raise ValueError('reserved CIDRs must be a list of at most 64 IPv4 networks')
+    parsed = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError('reserved CIDR must be a valid IPv4 network')
+        try:
+            network = ipaddress.ip_network(value, strict=True)
+        except ValueError as exc:
+            raise ValueError('reserved CIDR must be a canonical IPv4 network') from exc
+        if not isinstance(network, ipaddress.IPv4Network):
+            raise ValueError('reserved CIDR must be IPv4, not IPv6')
+        if network not in parsed:
+            parsed.append(network)
+    return parsed
+
+
 def build_quickstart_plan(cp: str, worker: str, *, user: str, known_hosts: Path,
-                          timeout: int = 35, probe=ssh_probe) -> dict:
-    """Fresh SSH inventory and conservative network recommendations (NOT approval)."""
+                          timeout: int = 35, probe=ssh_probe,
+                          reserved_cidrs=()) -> dict:
+    """Fresh SSH inventory and conservative network recommendations (NOT approval).
+
+    Reserved CIDRs are operator-supplied; this cannot discover other clusters.
+    """
+    reserved = _parse_reserved_cidrs(reserved_cidrs)
     base = inspect_two_nodes(cp, worker, user=user, known_hosts=known_hosts,
                              timeout=timeout, probe=probe)
     out = {'schemaVersion': 'kauto.quickstart-install-plan/v1alpha1',
            'status': 'BLOCKED', 'applyAuthorized': False,
            'installationPerformed': False, 'nodes': base['nodes'], 'network': None,
+           'reservedCIDRs': [str(net) for net in reserved],
            'blockers': []}
     if base['status'] != 'DISCOVERY_CANDIDATES':
         out['blockers'].append('Unsafe or unsupported host detected')
@@ -36,7 +61,7 @@ def build_quickstart_plan(cp: str, worker: str, *, user: str, known_hosts: Path,
         out['blockers'].append('Node machine identities are duplicated')
     if ids[0][1] and ids[0][1] == ids[1][1]:
         out['blockers'].append('Node hardware UUIDs are duplicated')
-    used = []
+    used = list(reserved)
     mtu = []
     selected = []
     for i, facts in enumerate(samples):
@@ -95,5 +120,5 @@ def build_quickstart_plan(cp: str, worker: str, *, user: str, known_hosts: Path,
     out['network'] = {'nodes': selected, 'podCIDR': str(chosen[0]),
                       'serviceCIDR': str(chosen[1]), 'calicoVxlanMtuCandidate': min(mtu) - 50}
     out['status'] = 'REVIEW_REQUIRED'
-    out['blockers'] = ['Network selection is advisory: cross-node connectivity, path MTU, firewall, package pins and operator approval are not verified']
+    out['blockers'] = ['Network selection is advisory: operator-supplied CIDRs may be incomplete; cross-node connectivity, path MTU, firewall, package pins and operator approval are not verified']
     return out

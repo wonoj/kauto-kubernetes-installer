@@ -19,7 +19,8 @@ def facts(address, identity):
                         'routes': [{'dst': '192.168.0.0/24'}]}}
 
 
-def run(tmp_path, *, apply=False, confirmation='', fail_probe=False, runner=None):
+def run(tmp_path, *, apply=False, confirmation='', fail_probe=False, runner=None,
+        reserved_cidrs=()):
     kh = tmp_path / 'known_hosts'
     kh.write_text('test ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKnownHostPlaceholder\n')
     artifact = tmp_path / 'tigera.yaml'
@@ -36,7 +37,8 @@ def run(tmp_path, *, apply=False, confirmation='', fail_probe=False, runner=None
         calico_operator_file=artifact, calico_operator_sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(),
         calico_crds_file=crds, calico_crds_sha256=hashlib.sha256(crds.read_bytes()).hexdigest(),
         state_dir=tmp_path / 'state', apply=apply, confirmation=confirmation,
-        probe=probe, runner=runner or (lambda *a, **kw: SimpleNamespace(returncode=0)))
+        reserved_cidrs=reserved_cidrs, probe=probe,
+        runner=runner or (lambda *a, **kw: SimpleNamespace(returncode=0)))
 
 
 def test_dry_run_never_creates_state(tmp_path):
@@ -99,3 +101,43 @@ def test_missing_calico_crds_blocks_before_state(tmp_path):
             state_dir=tmp_path/'state',apply=True,
             confirmation='INSTALL_DISPOSABLE_TWO_NODE:192.168.0.110:192.168.0.111', probe=probe)
     assert not (tmp_path/'state').exists()
+
+
+def test_install_review_inherits_existing_cluster_reservations(tmp_path):
+    r = run(tmp_path, reserved_cidrs=('10.244.0.0/16', '10.96.0.0/12'))
+    assert r['status'] == 'REVIEW_REQUIRED_NO_INSTALL'
+    assert r['plan']['network']['podCIDR'] == '10.245.0.0/16'
+    assert r['plan']['network']['serviceCIDR'] == '172.30.0.0/16'
+    assert not (tmp_path/'state').exists()
+
+
+def test_install_apply_inventory_inherits_reserved_network(tmp_path):
+    import yaml
+    seen = []
+    def runner(argv, **kwargs):
+        with open(argv[argv.index('-i') + 1], encoding='utf-8') as fd:
+            seen.append(yaml.safe_load(fd))
+        return SimpleNamespace(returncode=0)
+    r = run(tmp_path, apply=True,
+            confirmation='INSTALL_DISPOSABLE_TWO_NODE:192.168.0.110:192.168.0.111',
+            reserved_cidrs=('10.244.0.0/16', '10.96.0.0/12'), runner=runner)
+    assert r['status'] == 'RETURNED_ZERO_REQUIRES_LIVE_ACCEPTANCE'
+    assert len(seen) == 1
+    hosts = seen[0]['all']['children']['kauto_lab_mvp_nodes']['hosts']
+    for host in hosts.values():
+        assert host['kauto_mvp_pod_cidr'] == '10.245.0.0/16'
+        assert host['kauto_mvp_service_cidr'] == '172.30.0.0/16'
+
+
+def test_install_exhausted_cidrs_never_runs_ansible(tmp_path):
+    seen = []
+    def runner(*a, **kw):
+        seen.append(True)
+        return SimpleNamespace(returncode=0)
+    r = run(tmp_path, apply=True,
+            confirmation='INSTALL_DISPOSABLE_TWO_NODE:192.168.0.110:192.168.0.111',
+            reserved_cidrs=('10.0.0.0/8', '172.29.0.0/16'), runner=runner)
+    assert r['status'] == 'BLOCKED_PREFLIGHT'
+    assert not r['executionPerformed']
+    assert not (tmp_path/'state').exists()
+    assert not seen
