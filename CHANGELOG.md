@@ -1,3 +1,14 @@
+## 0.9.0a11 (unreleased candidate) - UFW preflight repair
+
+- Fix the two-node Ansible UFW assertion YAML string type.
+- Save captured Ansible stdout/stderr in a local 0600 log.
+- Add regression tests for assertion types and diagnostic logging.
+- Verify 567 local tests and three GitHub Actions workflows on
+  the initial repair commit.
+- Preserve the published v0.9.0a10 tag and failed-install records.
+- Actual two-node installation acceptance remains pending.
+- Stable release and general installation support remain blocked.
+
 ## 0.9.0a10 (unreleased candidate) — operator-declared CIDR reservations
 
 - Add repeatable `--reserved-cidr` to the two-node preview and installer; reject
