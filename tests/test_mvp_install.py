@@ -141,3 +141,32 @@ def test_install_exhausted_cidrs_never_runs_ansible(tmp_path):
     assert not r['executionPerformed']
     assert not (tmp_path/'state').exists()
     assert not seen
+
+
+
+def test_failed_install_saves_private_ansible_log(tmp_path):
+    def runner(*args, **kwargs):
+        return SimpleNamespace(
+            returncode=2,
+            stdout="synthetic stdout",
+            stderr="synthetic stderr",
+        )
+
+    result = run(
+        tmp_path,
+        apply=True,
+        confirmation=(
+            "INSTALL_DISPOSABLE_TWO_NODE:"
+            "192.168.0.110:192.168.0.111"
+        ),
+        runner=runner,
+    )
+
+    log = tmp_path / "state/mvp-ansible.log"
+    assert result["status"] == "FAILED_MANUAL_REVIEW"
+    assert result["ansibleExitCode"] == 2
+    assert log.is_file()
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert "synthetic stdout" in log.read_text()
+    assert "synthetic stderr" in log.read_text()
+    assert "synthetic stderr" not in str(result)

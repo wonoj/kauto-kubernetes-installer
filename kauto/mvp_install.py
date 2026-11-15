@@ -141,6 +141,15 @@ def install_two_nodes(cp: str, worker: str, *, user: str, known_hosts: Path,
                         text=True, capture_output=True, check=False,timeout=7200)
     except (OSError, subprocess.TimeoutExpired):
         return {**base,'status':'UNKNOWN_PARTIAL_STATE_MANUAL_REVIEW','executionPerformed':True}
+    log = state / 'mvp-ansible.log'
+    log_fd = os.open(
+        log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+    )
+    with os.fdopen(log_fd, 'w', encoding='utf-8') as stream:
+        print("===== STDOUT =====", file=stream)
+        print(getattr(result, 'stdout', '') or '', file=stream)
+        print("===== STDERR =====", file=stream)
+        print(getattr(result, 'stderr', '') or '', file=stream)
     return {**base,'status':'RETURNED_ZERO_REQUIRES_LIVE_ACCEPTANCE' if result.returncode == 0
             else 'FAILED_MANUAL_REVIEW', 'executionPerformed':True,
             'ansibleExitCode': result.returncode}

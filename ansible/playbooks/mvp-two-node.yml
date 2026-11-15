@@ -70,7 +70,7 @@
     - name: Do not alter existing firewall policy
       ansible.builtin.assert:
         that:
-          - kauto_ufw.stdout is not search('(?m)^Status: active')
+          - "kauto_ufw.stdout is not search('(?m)^Status: active')"
     - name: Check current Kubernetes and runtime packages
       ansible.builtin.command:
         argv: [dpkg-query, -W, '-f=${Status}', '{{ item }}']
