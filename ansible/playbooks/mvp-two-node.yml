@@ -244,6 +244,15 @@
       ansible.builtin.command:
         argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply,
                -f, /root/kauto-calico-installation.yaml]
+    - name: Wait for Calico DaemonSet creation
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system,
+               get, daemonset/calico-node]
+      register: kauto_calico_ds_lookup
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: kauto_calico_ds_lookup.rc == 0
     - name: Wait for Calico CNI
       ansible.builtin.command:
         argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, -n, calico-system,
