@@ -1,4 +1,21 @@
-# Kauto 0.9.0a10 — unreleased CIDR-reservation candidate
+# Kauto 0.9.0a11 - experimental source pre-release
+
+**STATUS: EXPERIMENTAL SOURCE PRE-RELEASE; INSTALLATION NOT VERIFIED.**
+
+This candidate fixes the Ansible UFW assertion YAML type error
+discovered during the first two-node installation attempt. It also
+preserves Ansible output in a private local diagnostic file.
+
+The patch passed 567 local tests and three GitHub Actions workflows.
+These results do not establish successful Kubernetes installation.
+
+The existing v0.9.0a10 tag is immutable. Do not retry the failed
+installation or claim a supported Kubernetes stack until the new
+release and disposable-VM acceptance gates have been completed.
+
+---
+
+## Historical notes: Kauto 0.9.0a10
 
 The experimental two-node CLI adds repeatable `--reserved-cidr` to
 `quickstart-plan` **and** `install`. Operators must declare networks belonging
@@ -7,7 +24,7 @@ For example, reserve `10.244.0.0/16` and `10.96.0.0/12` to avoid the existing
 cluster when planning the separate VM 110/111 lab. See
 [CIDR reservation review](docs/step9/CIDR_RESERVATION_PATCH.md).
 
-**NOT PUBLISHED; NOT INSTALL APPROVED.** This change has offline regression tests,
+**Historical pre-publication note; NOT INSTALL APPROVED.** This change has offline regression tests,
 not an actual VM installation acceptance result. The already-published
 `v0.9.0a9` tag remains unchanged; do not run `install --apply` until all
 installation gates, host snapshots and artifact/compatibility review pass.
