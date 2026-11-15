@@ -1,4 +1,4 @@
-## 0.9.0a11 (unreleased candidate) - UFW preflight repair
+## 0.9.0a11 - UFW preflight repair (source pre-release)
 
 - Fix the two-node Ansible UFW assertion YAML string type.
 - Save captured Ansible stdout/stderr in a local 0600 log.

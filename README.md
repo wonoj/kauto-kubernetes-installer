@@ -1,6 +1,6 @@
-# Kauto 0.9.0a11 - experimental fix candidate
+# Kauto 0.9.0a11 - experimental source pre-release
 
-**STATUS: UNRELEASED SOURCE PRE-RELEASE CANDIDATE.**
+**STATUS: EXPERIMENTAL SOURCE PRE-RELEASE; INSTALLATION NOT VERIFIED.**
 
 This candidate fixes the Ansible UFW assertion YAML type error
 discovered during the first two-node installation attempt. It also
